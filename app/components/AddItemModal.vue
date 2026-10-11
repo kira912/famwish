@@ -191,13 +191,15 @@ async function handleSubmit() {
     ? customRecipientInput.value.trim()
     : form.recipientName.trim() || currentList.value?.ownerName || currentUser.value?.name || 'Moi'
 
+  const finalUrl = form.url.trim() || (activeTab.value === 'link' ? rawUrlInput.value.trim() : '') || undefined
+
   const payload: Partial<WishlistItem> = {
     title: form.title.trim(),
     recipientName: recipient,
     description: form.description.trim() || undefined,
-    url: form.url.trim() || undefined,
+    url: finalUrl,
     imageUrl: form.imageUrl.trim() || undefined,
-    price: form.price ? Number(form.price) : undefined,
+    price: (form.price !== undefined && form.price !== null && !isNaN(Number(form.price))) ? Number(form.price) : undefined,
     currency: form.currency || '€',
     quantity: form.quantity > 0 ? form.quantity : 1,
     colorOrVariant: form.colorOrVariant.trim() || undefined,
@@ -215,14 +217,20 @@ async function handleSubmit() {
       if (updated) {
         emit('saved', updated)
         emit('close')
+      } else {
+        toast.error('Erreur lors de la modification du cadeau')
       }
     } else {
       const created = await addItem(props.listId, payload)
       if (created) {
         emit('saved', created)
         emit('close')
+      } else {
+        toast.error('Erreur lors de l\'ajout du cadeau')
       }
     }
+  } catch (err) {
+    toast.error('Une erreur est survenue lors de l\'enregistrement')
   } finally {
     isSubmitting.value = false
   }
@@ -534,7 +542,8 @@ async function handleSubmit() {
               :disabled="!form.title.trim() || isSubmitting"
               class="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 disabled:opacity-50 text-white font-semibold text-sm shadow-glow transition-all active:scale-[0.99]"
             >
-              <Sparkles class="w-4 h-4 text-amber-200" />
+              <Loader2 v-if="isSubmitting" class="w-4 h-4 animate-spin" />
+              <Sparkles v-else class="w-4 h-4 text-amber-200" />
               <span>{{ isSubmitting ? 'Enregistrement...' : (editingItem ? 'Enregistrer les modifications' : 'Ajouter à ma liste 🎁') }}</span>
             </button>
           </div>

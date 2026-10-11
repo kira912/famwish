@@ -198,13 +198,19 @@ export function useWishlists() {
   }
 
   async function addItem(listId: string, itemPayload: Partial<WishlistItem>): Promise<WishlistItem | null> {
-    const list = getList(listId)
+    let list = getList(listId)
+    if (!list) {
+      list = (await fetchListById(listId)) || undefined
+    }
     if (!list) return null
 
     const newItem: WishlistItem = {
       id: itemPayload.id || `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       listId: list.id,
       title: itemPayload.title || 'Nouveau cadeau',
+      recipientName: itemPayload.recipientName || list.ownerName || 'Moi',
+      recipientId: itemPayload.recipientId,
+      recipientAvatar: itemPayload.recipientAvatar,
       description: itemPayload.description,
       url: itemPayload.url,
       imageUrl: itemPayload.imageUrl,
@@ -241,7 +247,10 @@ export function useWishlists() {
   }
 
   async function updateItem(listId: string, item: WishlistItem): Promise<WishlistItem | null> {
-    const list = getList(listId)
+    let list = getList(listId)
+    if (!list) {
+      list = (await fetchListById(listId)) || undefined
+    }
     if (!list) return null
 
     try {

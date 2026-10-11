@@ -214,6 +214,10 @@ export async function addMemberToList(
 
 // Save or add item
 export async function saveItem(listId: string, item: WishlistItem): Promise<WishlistItem | null> {
+  const target = await getListById(listId)
+  if (!target) return null
+  const actualListId = target.id
+
   const pool = getPgPool()
   if (pool) {
     await initPostgresSchema()
@@ -248,7 +252,7 @@ export async function saveItem(listId: string, item: WishlistItem): Promise<Wish
     `
     const values = [
       item.id,
-      listId,
+      actualListId,
       item.title,
       item.recipientName || null,
       item.recipientId || null,
@@ -274,14 +278,13 @@ export async function saveItem(listId: string, item: WishlistItem): Promise<Wish
     return mapRowToWishlistItem(rows[0])
   }
 
-  const list = await getListById(listId)
-  if (!list) return null
+  const list = target
 
   const itemIndex = list.items.findIndex(i => i.id === item.id)
   if (itemIndex >= 0) {
-    list.items[itemIndex] = { ...item, updatedAt: new Date().toISOString() }
+    list.items[itemIndex] = { ...item, listId: actualListId, updatedAt: new Date().toISOString() }
   } else {
-    list.items.unshift({ ...item, updatedAt: new Date().toISOString() })
+    list.items.unshift({ ...item, listId: actualListId, updatedAt: new Date().toISOString() })
   }
   list.updatedAt = new Date().toISOString()
   return item
@@ -289,14 +292,17 @@ export async function saveItem(listId: string, item: WishlistItem): Promise<Wish
 
 // Delete item
 export async function deleteItem(listId: string, itemId: string): Promise<boolean> {
+  const target = await getListById(listId)
+  if (!target) return false
+  const actualListId = target.id
+
   const pool = getPgPool()
   if (pool) {
     await initPostgresSchema()
-    const res = await pool.query('DELETE FROM wishlist_items WHERE id = $1 AND list_id = $2', [itemId, listId])
+    const res = await pool.query('DELETE FROM wishlist_items WHERE id = $1 AND list_id = $2', [itemId, actualListId])
     return (res.rowCount ?? 0) > 0
   }
-  const list = await getListById(listId)
-  if (!list) return false
+  const list = target
 
   const itemIndex = list.items.findIndex(i => i.id === itemId)
   if (itemIndex >= 0) {
@@ -316,6 +322,10 @@ export async function togglePurchaseItem(
   anonymous: boolean = true,
   userId?: string
 ): Promise<WishlistItem | null> {
+  const target = await getListById(listId)
+  if (!target) return null
+  const actualListId = target.id
+
   const pool = getPgPool()
   if (pool) {
     await initPostgresSchema()
@@ -343,15 +353,14 @@ export async function togglePurchaseItem(
       purchased ? now : null,
       now,
       itemId,
-      listId
+      actualListId
     ])
 
     if (rows.length === 0) return null
     return mapRowToWishlistItem(rows[0])
   }
 
-  const list = await getListById(listId)
-  if (!list) return null
+  const list = target
 
   const item = list.items.find(i => i.id === itemId)
   if (!item) return null
