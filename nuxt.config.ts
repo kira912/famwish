@@ -29,7 +29,11 @@ export default defineNuxtConfig({
         { rel: 'apple-touch-icon', href: '/icons/icon-192x192.png' }
       ],
       script: [
-        { src: 'https://accounts.google.com/gsi/client', async: true, defer: true }
+        { src: 'https://accounts.google.com/gsi/client', async: true, defer: true },
+        {
+          innerHTML: `(function(){try{var t=localStorage.getItem('famwish_theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}else if(t==='light'){document.documentElement.classList.remove('dark');}}catch(e){}})();`,
+          type: 'text/javascript'
+        }
       ]
     },
     pageTransition: { name: 'page', mode: 'out-in' }

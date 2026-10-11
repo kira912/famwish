@@ -3,11 +3,13 @@ import { ref, onMounted } from 'vue'
 import { useAuth } from '~/composables/useAuth'
 import { useWishlists } from '~/composables/useWishlists'
 import { usePwa } from '~/composables/usePwa'
+import { useTheme } from '~/composables/useTheme'
 import type { Wishlist } from '~/types'
 
 const { initAuth } = useAuth()
 const { fetchLists } = useWishlists()
 const { initPwa } = usePwa()
+const { initTheme } = useTheme()
 
 const isCreateModalOpen = ref(false)
 const isScannerModalOpen = ref(false)
@@ -15,6 +17,7 @@ const isShareModalOpen = ref(false)
 const listToShare = ref<Wishlist | null>(null)
 
 onMounted(async () => {
+  initTheme()
   initAuth()
   initPwa()
   await fetchLists()

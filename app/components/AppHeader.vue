@@ -15,6 +15,7 @@ import {
 } from 'lucide-vue-next'
 import { useAuth } from '~/composables/useAuth'
 import { usePwa } from '~/composables/usePwa'
+import { useTheme } from '~/composables/useTheme'
 
 const emit = defineEmits<{
   (e: 'openCreateList'): void
@@ -23,19 +24,7 @@ const emit = defineEmits<{
 
 const { currentUser, openAuthModal } = useAuth()
 const { isInstallable, isInstalled, isIos, openInstallModal, isOnline } = usePwa()
-
-const isDark = ref(false)
-
-function toggleDarkMode() {
-  isDark.value = !isDark.value
-  if (import.meta.client) {
-    if (isDark.value) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }
-}
+const { isDark, toggleDark } = useTheme()
 </script>
 
 <template>
@@ -100,7 +89,7 @@ function toggleDarkMode() {
 
         <!-- Dark mode toggle -->
         <button
-          @click="toggleDarkMode"
+          @click="toggleDark"
           class="p-2.5 rounded-2xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           title="Changer de thème"
         >
