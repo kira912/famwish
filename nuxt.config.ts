@@ -26,7 +26,8 @@ export default defineNuxtConfig({
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap' },
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
-        { rel: 'apple-touch-icon', href: '/icons/icon-192x192.png' }
+        { rel: 'apple-touch-icon', href: '/icons/icon-192x192.png' },
+        { rel: 'manifest', href: '/manifest.webmanifest' }
       ],
       script: [
         { src: 'https://accounts.google.com/gsi/client', async: true, defer: true },
@@ -42,6 +43,7 @@ export default defineNuxtConfig({
   pwa: {
     registerType: 'autoUpdate',
     manifest: {
+      id: '/',
       name: 'FamWish - Listes de Souhaits Famille',
       short_name: 'FamWish',
       description: 'Partagez vos listes de cadeaux pour Noël et anniversaires sans gâcher la surprise !',
@@ -51,22 +53,42 @@ export default defineNuxtConfig({
       orientation: 'portrait',
       scope: '/',
       start_url: '/',
+      lang: 'fr',
+      categories: ['lifestyle', 'shopping', 'social'],
       icons: [
         {
           src: '/icons/icon-192x192.png',
           sizes: '192x192',
-          type: 'image/png'
-        },
-        {
-          src: '/icons/icon-512x512.png',
-          sizes: '512x512',
-          type: 'image/png'
+          type: 'image/png',
+          purpose: 'any'
         },
         {
           src: '/icons/icon-512x512.png',
           sizes: '512x512',
           type: 'image/png',
-          purpose: 'any maskable'
+          purpose: 'any'
+        },
+        {
+          src: '/icons/icon-512x512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'maskable'
+        }
+      ],
+      shortcuts: [
+        {
+          name: 'Mes Listes',
+          short_name: 'Listes',
+          description: 'Accéder directement à mes listes de souhaits',
+          url: '/',
+          icons: [{ src: '/icons/icon-192x192.png', sizes: '192x192' }]
+        },
+        {
+          name: 'Rejoindre une liste',
+          short_name: 'Rejoindre',
+          description: 'Rejoindre une liste partagée par un proche',
+          url: '/join',
+          icons: [{ src: '/icons/icon-192x192.png', sizes: '192x192' }]
         }
       ]
     },
@@ -78,7 +100,7 @@ export default defineNuxtConfig({
       installPrompt: true
     },
     devOptions: {
-      enabled: false,
+      enabled: true,
       type: 'module'
     }
   },
