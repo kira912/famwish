@@ -64,6 +64,15 @@ const rawUrlInput = ref('')
 const customRecipientInput = ref('')
 const showCustomRecipient = ref(false)
 
+watch(rawUrlInput, (newVal) => {
+  if (newVal) {
+    const match = newVal.match(/https?:\/\/[^\s"'<>]+/i)
+    if (match && match[0] !== newVal) {
+      rawUrlInput.value = match[0]
+    }
+  }
+})
+
 const form = reactive({
   title: '',
   recipientName: '',
@@ -142,16 +151,16 @@ async function fetchLinkMetadata() {
     })
 
     form.url = data.url || url
-    if (data.title && !form.title) {
+    if (data.title) {
       form.title = data.title
     }
     if (data.description && !form.description) {
       form.description = data.description
     }
-    if (data.imageUrl && !form.imageUrl) {
+    if (data.imageUrl) {
       form.imageUrl = data.imageUrl
     }
-    if (data.price !== undefined && form.price === undefined) {
+    if (data.price !== undefined) {
       form.price = data.price
     }
     if (data.currency) {
@@ -168,6 +177,7 @@ async function fetchLinkMetadata() {
         form.title = 'Lien produit'
       }
     }
+    toast.error('Impossible d\'extraire les infos automatiquement, vous pouvez les saisir manuellement.')
   } finally {
     isFetchingPreview.value = false
   }
