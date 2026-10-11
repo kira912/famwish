@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuth } from '~/composables/useAuth'
-import { X, Sparkles, User, LogOut, Check, ArrowRight, ShieldCheck } from 'lucide-vue-next'
+import { X, Sparkles, User, LogOut, Check, ArrowRight, ShieldCheck, UserPlus } from 'lucide-vue-next'
 
 const {
   currentUser,
   isAuthModalOpen,
   closeAuthModal,
-  loginAsDemoUser,
   createCustomUser,
   triggerGoogleLogin,
   isGoogleLoading,
-  DEMO_PROFILES,
   logout
 } = useAuth()
 
@@ -121,38 +119,8 @@ function handleCustomCreate() {
         <div class="relative flex items-center justify-center my-6">
           <div class="border-t border-slate-200 dark:border-slate-800 w-full" />
           <span class="bg-white dark:bg-slate-900 px-3 text-xs text-slate-400 uppercase tracking-wider font-semibold absolute">
-            Ou tester avec un profil famille
+            Ou continuer avec un prénom
           </span>
-        </div>
-
-        <!-- Quick Switch Demo Family Profiles -->
-        <div class="space-y-2 mb-6">
-          <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">
-            Passez d'un membre de la famille à l'autre pour tester le secret des réservations :
-          </p>
-
-          <div class="grid grid-cols-2 gap-2.5">
-            <button
-              v-for="profile in DEMO_PROFILES"
-              :key="profile.id"
-              @click="loginAsDemoUser(profile.id)"
-              class="flex items-center gap-2.5 p-2.5 rounded-2xl border text-left transition-all"
-              :class="currentUser?.id === profile.id
-                ? 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/40 text-slate-900 dark:text-white ring-2 ring-rose-500/20'
-                : 'border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white/50 dark:bg-slate-800/40 text-slate-700 dark:text-slate-300'"
-            >
-              <img
-                :src="profile.avatar"
-                :alt="profile.name"
-                class="w-8 h-8 rounded-full object-cover shrink-0"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="text-xs font-semibold truncate">{{ profile.name }}</div>
-                <div class="text-[10px] text-slate-400 truncate">{{ profile.id === 'user-lea' ? 'Créateur liste Noël' : 'Membre famille' }}</div>
-              </div>
-              <Check v-if="currentUser?.id === profile.id" class="w-4 h-4 text-rose-600 shrink-0" />
-            </button>
-          </div>
         </div>
 
         <!-- Custom Name Creator -->

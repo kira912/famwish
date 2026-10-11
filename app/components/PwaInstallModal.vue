@@ -9,13 +9,16 @@ import {
   Share2,
   PlusSquare,
   CheckCircle2,
-  Smartphone
+  Smartphone,
+  MoreVertical,
+  Laptop
 } from 'lucide-vue-next'
 import { usePwa } from '~/composables/usePwa'
 
 const {
   showInstallModal,
   isInstalled,
+  isInstallable,
   isIos,
   isSafari,
   promptInstall,
@@ -23,8 +26,12 @@ const {
 } = usePwa()
 
 async function handleInstall() {
-  const installed = await promptInstall()
-  if (installed) {
+  if (isInstallable.value) {
+    const installed = await promptInstall()
+    if (installed) {
+      dismissInstall()
+    }
+  } else {
     dismissInstall()
   }
 }
@@ -140,19 +147,30 @@ async function handleInstall() {
             </ol>
           </div>
 
+          <!-- Android / Desktop browser instructions when beforeinstallprompt is not direct -->
+          <div v-else-if="!isInstallable" class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+            <div class="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-bold text-xs">
+              <MoreVertical class="w-4 h-4 text-amber-600" />
+              <span>Installation rapide :</span>
+            </div>
+            <p class="text-xs text-amber-900/80 dark:text-amber-300/80 leading-relaxed">
+              Dans le menu de votre navigateur (<strong>⋮</strong> en haut à droite sur Chrome/Android ou l'icône d'installation dans la barre d'adresse sur PC), choisissez <strong>"Installer l'application"</strong> ou <strong>"Ajouter à l'écran d'accueil"</strong>.
+            </p>
+          </div>
+
           <!-- Actions -->
           <div class="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
-            <!-- If not iOS and installable directly -->
+            <!-- If installable via native prompt event -->
             <button
-              v-if="!isIos"
+              v-if="isInstallable"
               @click="handleInstall"
               class="w-full sm:flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:from-rose-700 hover:to-amber-600 text-white font-bold text-sm shadow-glow flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
             >
               <Download class="w-4 h-4" />
-              <span>Installer l'application</span>
+              <span>Installer l'application en 1 clic</span>
             </button>
 
-            <!-- For iOS: Got it button -->
+            <!-- For iOS or manual guide: Got it button -->
             <button
               v-else
               @click="dismissInstall"

@@ -5,37 +5,6 @@ const currentUser = ref<UserProfile | null>(null)
 const isAuthModalOpen = ref(false)
 const isGoogleLoading = ref(false)
 
-export const DEMO_PROFILES: UserProfile[] = [
-  {
-    id: 'user-lea',
-    name: 'Léa Bernard',
-    email: 'lea.bernard@example.com',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    joinedListIds: ['list-noel-famille', 'list-anniv-lucas']
-  },
-  {
-    id: 'user-thomas',
-    name: 'Thomas Bernard',
-    email: 'thomas.bernard@example.com',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    joinedListIds: ['list-noel-famille']
-  },
-  {
-    id: 'user-maman',
-    name: 'Isabelle (Maman)',
-    email: 'maman.isabelle@example.com',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
-    joinedListIds: ['list-noel-famille', 'list-anniv-lucas']
-  },
-  {
-    id: 'user-lucas',
-    name: 'Lucas 🚀',
-    email: 'lucas@example.com',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    joinedListIds: ['list-anniv-lucas', 'list-noel-famille']
-  }
-]
-
 export function useAuth() {
   const isAuthenticated = computed(() => !!currentUser.value)
 
@@ -169,7 +138,6 @@ export function useAuth() {
     isAuthenticated,
     isAuthModalOpen,
     isGoogleLoading,
-    DEMO_PROFILES,
     initAuth,
     setUser,
     loginAsDemoUser,

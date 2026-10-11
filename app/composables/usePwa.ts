@@ -25,10 +25,15 @@ export function usePwa() {
     isSafari.value = /safari/.test(userAgent) && !/chrome|crios|fxios|edgios/.test(userAgent)
 
     // Check standalone mode (already installed or opened as standalone PWA)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true ||
+      document.referrer.includes('android-app://')
+
     if (isStandalone) {
       isInstalled.value = true
       isInstallable.value = false
+      showInstallModal.value = false
+      return
     }
 
     // Listen for standard browser install prompt (Chrome, Edge, Android, Desktop)
@@ -46,29 +51,25 @@ export function usePwa() {
       deferredPrompt = null
     })
 
-    // If on iOS or browsers without beforeinstallprompt, still check after short delay
+    // Proactively propose installation when the app is not already installed
     setTimeout(() => {
       checkAndShowPrompt()
-    }, 1500)
+    }, 1000)
   }
 
-  function checkAndShowPrompt() {
+  function checkAndShowPrompt(force = false) {
     if (!import.meta.client) return
     if (isInstalled.value) return
 
-    const dismissed = localStorage.getItem(STORAGE_KEY)
-    if (dismissed) {
-      // Check if dismissed more than 3 days ago
-      const dismissedTime = parseInt(dismissed, 10)
-      if (!isNaN(dismissedTime) && Date.now() - dismissedTime < 3 * 24 * 60 * 60 * 1000) {
+    if (!force) {
+      const dismissed = sessionStorage.getItem(STORAGE_KEY)
+      if (dismissed) {
         return
       }
     }
 
-    // Show modal if installable or if iOS Safari (where manual add to home screen is possible)
-    if (isInstallable.value || isIos.value) {
-      showInstallModal.value = true
-    }
+    // Always propose when app is not installed
+    showInstallModal.value = true
   }
 
   async function promptInstall() {
@@ -89,7 +90,7 @@ export function usePwa() {
   function dismissInstall() {
     showInstallModal.value = false
     if (import.meta.client) {
-      localStorage.setItem(STORAGE_KEY, Date.now().toString())
+      sessionStorage.setItem(STORAGE_KEY, 'true')
     }
   }
 

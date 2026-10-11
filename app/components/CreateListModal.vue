@@ -24,7 +24,7 @@ const isSubmitting = ref(false)
 const ownerName = ref('')
 
 const categories: { key: WishlistCategory; label: string; emoji: string; gradient: string }[] = [
-  { key: 'christmas', label: 'Noël & Fêtes', emoji: '🎄', gradient: 'from-rose-500 via-brand-600 to-pine-700' },
+  { key: 'christmas', label: 'Noël & Fêtes', emoji: '🎄', gradient: 'from-xmas-800 via-rose-700 to-amber-700' },
   { key: 'birthday', label: 'Anniversaire', emoji: '🎂', gradient: 'from-amber-500 via-brand-500 to-indigo-600' },
   { key: 'birth', label: 'Naissance & Bébé', emoji: '🍼', gradient: 'from-pink-400 via-rose-300 to-sky-400' },
   { key: 'wedding', label: 'Mariage & Fiançailles', emoji: '💍', gradient: 'from-amber-400 via-gold-500 to-rose-400' },
@@ -32,7 +32,7 @@ const categories: { key: WishlistCategory; label: string; emoji: string; gradien
   { key: 'other', label: 'Autre occasion', emoji: '✨', gradient: 'from-indigo-500 via-purple-600 to-pink-600' }
 ]
 
-const emojis = ['🎄', '🎁', '🎂', '🥳', '🍼', '💍', '🏡', '✨', '⭐', '🎈', '🎅', '🧸', '🎮', '📚']
+const emojis = ['🎄', '🎁', '🎅', '⭐', '🎂', '🥳', '🍼', '💍', '🏡', '✨', '🎈', '🧸', '🎮', '📚']
 
 const form = reactive({
   title: '',
@@ -40,7 +40,7 @@ const form = reactive({
   category: 'christmas' as WishlistCategory,
   eventDate: '',
   coverEmoji: '🎄',
-  coverGradient: 'from-rose-500 via-brand-600 to-pine-700'
+  coverGradient: 'from-xmas-800 via-rose-700 to-amber-700'
 })
 
 watch(() => props.isOpen, (open) => {
@@ -51,14 +51,14 @@ watch(() => props.isOpen, (open) => {
       form.category = props.editingList.category
       form.eventDate = props.editingList.eventDate || ''
       form.coverEmoji = props.editingList.coverEmoji || '🎁'
-      form.coverGradient = props.editingList.coverGradient || 'from-rose-500 via-brand-600 to-pine-700'
+      form.coverGradient = props.editingList.coverGradient || 'from-xmas-800 via-rose-700 to-amber-700'
     } else {
       form.title = ''
       form.description = ''
       form.category = 'christmas'
       form.eventDate = '2026-12-24'
       form.coverEmoji = '🎄'
-      form.coverGradient = 'from-rose-500 via-brand-600 to-pine-700'
+      form.coverGradient = 'from-xmas-800 via-rose-700 to-amber-700'
     }
   }
 })

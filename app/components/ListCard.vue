@@ -18,6 +18,13 @@ const isOwner = computed(() => {
   return props.list.ownerId === currentUser.value?.id
 })
 
+const isChristmas = computed(() => {
+  return props.list.category === 'christmas' ||
+    props.list.title.toLowerCase().includes('noël') ||
+    props.list.title.toLowerCase().includes('noel') ||
+    props.list.title.toLowerCase().includes('christmas')
+})
+
 // Distinct family members in this list
 const distinctRecipients = computed(() => {
   const set = new Set<string>()
@@ -50,35 +57,52 @@ const gradientClass = computed(() => {
 
 <template>
   <div
-    class="group relative rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col justify-between hover:-translate-y-1"
+    class="group relative rounded-3xl bg-white dark:bg-slate-900 border shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col justify-between hover:-translate-y-1"
+    :class="isChristmas
+      ? 'border-amber-200/70 dark:border-amber-900/40 hover:border-amber-400 dark:hover:border-amber-500/60'
+      : 'border-slate-100 dark:border-slate-800'"
   >
     <!-- Top banner with gradient & emoji -->
     <div
-      class="h-28 sm:h-32 bg-gradient-to-r p-4 relative flex items-start justify-between overflow-hidden"
-      :class="gradientClass"
+      class="h-28 sm:h-32 p-4 relative flex items-start justify-between overflow-hidden"
+      :class="isChristmas
+        ? 'bg-christmas-pattern'
+        : `bg-gradient-to-r ${gradientClass}`"
     >
       <!-- Background subtle shapes -->
       <div class="absolute -right-6 -bottom-6 w-28 h-28 bg-white/10 rounded-full blur-xl pointer-events-none" />
       <div class="absolute -left-6 -top-6 w-24 h-24 bg-white/15 rounded-full blur-lg pointer-events-none" />
+      <div v-if="isChristmas" class="absolute inset-0 bg-christmas-gold-stars pointer-events-none opacity-40" />
 
       <!-- Left Badge & Emoji -->
       <div class="flex items-center gap-2.5 relative z-10">
-        <div class="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner border border-white/30 text-white">
-          {{ list.coverEmoji || '🎁' }}
+        <div
+          class="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-inner border text-white transition-transform group-hover:scale-105"
+          :class="isChristmas ? 'bg-amber-400/20 backdrop-blur-md border-amber-300/40' : 'bg-white/20 backdrop-blur-md border-white/30'"
+        >
+          {{ list.coverEmoji || (isChristmas ? '🎄' : '🎁') }}
         </div>
-        <div>
-          <span
-            v-if="isOwner"
-            class="px-2.5 py-0.5 rounded-full bg-white/90 text-rose-700 text-[10px] font-bold uppercase tracking-wider shadow-sm"
-          >
-            Ma liste
-          </span>
-          <span
-            v-else
-            class="px-2.5 py-0.5 rounded-full bg-black/30 backdrop-blur-md text-white text-[10px] font-semibold"
-          >
-            Liste de {{ list.ownerName }}
-          </span>
+        <div class="space-y-1">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span
+              v-if="isChristmas"
+              class="px-2 py-0.5 rounded-full gold-badge text-[9px] font-black uppercase tracking-wider"
+            >
+              Noël ✨
+            </span>
+            <span
+              v-if="isOwner"
+              class="px-2.5 py-0.5 rounded-full bg-white/90 text-rose-800 text-[10px] font-bold uppercase tracking-wider shadow-sm"
+            >
+              Ma liste
+            </span>
+            <span
+              v-else
+              class="px-2.5 py-0.5 rounded-full bg-black/30 backdrop-blur-md text-white text-[10px] font-semibold"
+            >
+              Liste de {{ list.ownerName }}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -92,10 +116,14 @@ const gradientClass = computed(() => {
       </button>
 
       <!-- Bottom overlay on banner with countdown -->
-      <div v-if="daysLeft !== null" class="absolute bottom-2.5 right-3 text-white/90 text-xs font-semibold flex items-center gap-1 backdrop-blur-sm bg-black/20 px-2 py-0.5 rounded-lg">
-        <Calendar class="w-3.5 h-3.5 text-amber-200" />
-        <span v-if="daysLeft > 0">J-{{ daysLeft }}</span>
-        <span v-else-if="daysLeft === 0">C'est aujourd'hui ! 🎉</span>
+      <div
+        v-if="daysLeft !== null"
+        class="absolute bottom-2.5 right-3 text-white/90 text-xs font-semibold flex items-center gap-1 backdrop-blur-sm px-2 py-0.5 rounded-lg border"
+        :class="isChristmas ? 'bg-black/40 border-amber-400/30 text-amber-200' : 'bg-black/20 border-white/10 text-white/90'"
+      >
+        <Calendar class="w-3.5 h-3.5 text-amber-300" />
+        <span v-if="daysLeft > 0">J-{{ daysLeft }} {{ isChristmas ? 'avant Noël' : '' }}</span>
+        <span v-else-if="daysLeft === 0">Joyeux Noël ! 🎄</span>
         <span v-else>Passé</span>
       </div>
     </div>
@@ -165,9 +193,12 @@ const gradientClass = computed(() => {
       <!-- Bottom action button -->
       <NuxtLink
         :to="`/lists/${list.id}`"
-        class="w-full py-2.5 px-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 hover:bg-rose-500 hover:text-white dark:hover:bg-rose-600 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 group/btn shadow-sm"
+        class="w-full py-2.5 px-4 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 group/btn shadow-sm"
+        :class="isChristmas
+          ? 'bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800/40 hover:bg-gradient-to-r hover:from-red-600 hover:to-amber-600 hover:text-white hover:border-transparent'
+          : 'bg-slate-50 dark:bg-slate-800/80 hover:bg-rose-500 hover:text-white dark:hover:bg-rose-600 text-slate-700 dark:text-slate-200'"
       >
-        <span>{{ isOwner ? 'Gérer mes cadeaux' : 'Découvrir et réserver' }}</span>
+        <span>{{ isOwner ? (isChristmas ? 'Gérer les cadeaux de Noël 🎄' : 'Gérer mes cadeaux') : (isChristmas ? 'Voir les souhaits de Noël 🎁' : 'Découvrir et réserver') }}</span>
         <ArrowRight class="w-3.5 h-3.5 group-hover/btn:translate-x-1 transition-transform" />
       </NuxtLink>
     </div>

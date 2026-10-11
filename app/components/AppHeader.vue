@@ -53,9 +53,6 @@ function toggleDarkMode() {
             <span class="text-xl sm:text-2xl font-black font-display tracking-tight bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 bg-clip-text text-transparent">
               FamWish
             </span>
-            <span class="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold tracking-wider uppercase rounded-md bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300">
-              PWA
-            </span>
           </div>
           <span class="text-[10px] text-slate-500 dark:text-slate-400 -mt-1 font-medium hidden sm:inline">
             Listes de souhaits secrètes & partagées
@@ -71,9 +68,9 @@ function toggleDarkMode() {
 
       <!-- Right: Action Buttons & Profile -->
       <div class="flex items-center gap-2 sm:gap-3">
-        <!-- PWA Install Prompt Button if available -->
+        <!-- PWA Install Prompt Button if not already installed -->
         <button
-          v-if="(isInstallable || isIos) && !isInstalled"
+          v-if="!isInstalled"
           @click="openInstallModal"
           class="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-bold transition-all border border-amber-300/40"
         >

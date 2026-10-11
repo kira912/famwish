@@ -22,11 +22,17 @@ import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
 import type { WishlistItem } from '~/types'
 
-const props = defineProps<{
-  item: WishlistItem
-  isOwner: boolean
-  ownerName: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    item: WishlistItem
+    isOwner: boolean
+    ownerName: string
+    isChristmas?: boolean
+  }>(),
+  {
+    isChristmas: false
+  }
+)
 
 const emit = defineEmits<{
   (e: 'edit', item: WishlistItem): void
@@ -102,9 +108,21 @@ async function handleCancelReservation() {
     :class="[
       item.isPurchased && !isItemForMe
         ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800/60 opacity-80'
-        : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-rose-100 dark:hover:border-rose-950/50'
+        : isChristmas
+          ? 'bg-white dark:bg-slate-900 border-amber-200/60 dark:border-amber-900/40 shadow-sm hover:shadow-2xl hover:border-amber-400 dark:hover:border-amber-500/60 hover:-translate-y-0.5'
+          : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-rose-100 dark:hover:border-rose-950/50'
     ]"
   >
+    <!-- Christmas gold ribbon indicator on top right -->
+    <div
+      v-if="isChristmas && item.isFavorite"
+      class="absolute -top-1 -right-1 z-10 w-16 h-16 overflow-hidden pointer-events-none"
+    >
+      <div class="absolute transform rotate-45 bg-gradient-to-r from-amber-400 to-yellow-300 text-amber-950 font-black text-[9px] py-0.5 right-[-28px] top-[14px] w-[95px] text-center shadow-md tracking-wider uppercase">
+        Coup de ❤️
+      </div>
+    </div>
+
     <!-- Top Image Container -->
     <div class="relative w-full aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
       <img
@@ -114,9 +132,21 @@ async function handleCancelReservation() {
         class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
         loading="lazy"
       />
-      <div v-else class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-rose-50 via-slate-50 to-amber-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 text-slate-400">
-        <Sparkles class="w-10 h-10 text-rose-300 dark:text-rose-500/40 mb-1 animate-pulse" />
-        <span class="text-xs font-medium text-slate-400">Idée de cadeau</span>
+      <div
+        v-else
+        class="w-full h-full flex flex-col items-center justify-center text-slate-400"
+        :class="isChristmas
+          ? 'bg-gradient-to-br from-red-50/80 via-amber-50/60 to-slate-50 dark:from-red-950/30 dark:via-amber-950/20 dark:to-slate-900'
+          : 'bg-gradient-to-br from-rose-50 via-slate-50 to-amber-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900'"
+      >
+        <div v-if="isChristmas" class="relative">
+          <Sparkles class="w-10 h-10 text-amber-400 dark:text-amber-300 mb-1 animate-pulse" />
+          <span class="absolute -top-1 -right-1 text-sm">❄️</span>
+        </div>
+        <Sparkles v-else class="w-10 h-10 text-rose-300 dark:text-rose-500/40 mb-1 animate-pulse" />
+        <span class="text-xs font-semibold" :class="isChristmas ? 'text-amber-800/80 dark:text-amber-200/80' : 'text-slate-400'">
+          {{ isChristmas ? 'Idée de Noël 🎁' : 'Idée de cadeau' }}
+        </span>
       </div>
 
       <!-- Gradient overlay for readability -->
@@ -262,42 +292,48 @@ async function handleCancelReservation() {
             <button
               v-if="!showReserveDialog"
               @click="showReserveDialog = true"
-              class="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-semibold text-xs shadow-glow transition-all active:scale-[0.98]"
+              class="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl font-bold text-xs transition-all active:scale-[0.98]"
+              :class="isChristmas
+                ? 'ruby-button text-white shadow-glow'
+                : 'bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white shadow-glow'"
             >
               <Sparkles class="w-4 h-4 text-amber-200" />
-              <span>Cocher / Réserver ce cadeau</span>
+              <span>{{ isChristmas ? '🎁 Réserver pour Noël' : 'Cocher / Réserver ce cadeau' }}</span>
             </button>
 
             <!-- Inline Secret Reservation Popup Card -->
             <div
               v-else
-              class="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 space-y-3 animate-in fade-in"
+              class="p-3.5 rounded-2xl space-y-3 animate-in fade-in"
+              :class="isChristmas
+                ? 'bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800'
+                : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60'"
             >
-              <div class="text-xs font-bold text-rose-950 dark:text-rose-100 flex items-center justify-between">
-                <span>Réservation secrète</span>
-                <button @click="showReserveDialog = false" class="text-rose-400 hover:text-rose-600">✕</button>
+              <div class="text-xs font-bold flex items-center justify-between" :class="isChristmas ? 'text-amber-950 dark:text-amber-100' : 'text-rose-950 dark:text-rose-100'">
+                <span>{{ isChristmas ? '🎄 Réservation secrète de Noël' : 'Réservation secrète' }}</span>
+                <button @click="showReserveDialog = false" class="text-slate-400 hover:text-slate-600">✕</button>
               </div>
 
-              <div class="space-y-1.5 text-[11px] text-rose-900/80 dark:text-rose-200/80">
-                <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-rose-100 dark:border-rose-900/40">
+              <div class="space-y-1.5 text-[11px]" :class="isChristmas ? 'text-amber-900/80 dark:text-amber-200/80' : 'text-rose-900/80 dark:text-rose-200/80'">
+                <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
                   <input
                     v-model="isAnonymousChoice"
                     :value="true"
                     type="radio"
-                    class="text-rose-600 focus:ring-rose-500"
+                    :class="isChristmas ? 'text-amber-600 focus:ring-amber-500' : 'text-rose-600 focus:ring-rose-500'"
                   />
                   <div>
-                    <span class="font-semibold block text-slate-900 dark:text-white">Cocher Anonymement (Recommandé)</span>
-                    <span class="text-[10px] text-slate-400">Personne ne saura qui l'a acheté avant Noël !</span>
+                    <span class="font-semibold block text-slate-900 dark:text-white">Cocher Anonymement (Secret du Père Noël)</span>
+                    <span class="text-[10px] text-slate-400">Personne ne saura qui l'a acheté avant Noël ! 🤫</span>
                   </div>
                 </label>
 
-                <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-rose-100 dark:border-rose-900/40">
+                <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
                   <input
                     v-model="isAnonymousChoice"
                     :value="false"
                     type="radio"
-                    class="text-rose-600 focus:ring-rose-500"
+                    :class="isChristmas ? 'text-amber-600 focus:ring-amber-500' : 'text-rose-600 focus:ring-rose-500'"
                   />
                   <div>
                     <span class="font-semibold block text-slate-900 dark:text-white">Avec mon prénom {{ currentUser?.name ? `(${currentUser.name})` : '' }}</span>
@@ -311,7 +347,7 @@ async function handleCancelReservation() {
                     v-model="guestName"
                     type="text"
                     placeholder="Votre prénom (ex: Tonton Marc)"
-                    class="w-full px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-[11px] focus:outline-none focus:ring-1 focus:ring-rose-500"
+                    class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
               </div>
@@ -319,7 +355,10 @@ async function handleCancelReservation() {
               <button
                 @click="handleConfirmReservation(isAnonymousChoice)"
                 :disabled="isToggling"
-                class="w-full py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold shadow-sm flex items-center justify-center gap-1.5"
+                class="w-full py-2 text-white rounded-xl text-xs font-bold shadow-sm flex items-center justify-center gap-1.5"
+                :class="isChristmas
+                  ? 'ruby-button'
+                  : 'bg-rose-500 hover:bg-rose-600'"
               >
                 <Check class="w-3.5 h-3.5" />
                 <span>Confirmer l'achat secret 🎁</span>

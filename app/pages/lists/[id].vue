@@ -42,6 +42,14 @@ const isOwner = computed(() => {
   return list.value?.ownerId === currentUser.value?.id
 })
 
+const isChristmasList = computed(() => {
+  if (!list.value) return false
+  return list.value.category === 'christmas' ||
+    list.value.title.toLowerCase().includes('noël') ||
+    list.value.title.toLowerCase().includes('noel') ||
+    list.value.title.toLowerCase().includes('christmas')
+})
+
 // Modals
 const isAddItemOpen = ref(false)
 const itemToEdit = ref<WishlistItem | null>(null)
@@ -218,76 +226,109 @@ function handleShare() {
 
     <!-- Header Banner Card -->
     <div
-      class="relative rounded-3xl bg-gradient-to-r p-6 sm:p-8 text-white shadow-glow overflow-hidden"
-      :class="list.coverGradient || 'from-rose-600 via-brand-600 to-pine-800'"
+      class="relative rounded-3xl p-6 sm:p-8 text-white overflow-hidden transition-all"
+      :class="isChristmasList
+        ? 'bg-christmas-pattern gold-border-glow shadow-glow-gold'
+        : (list.coverGradient ? `bg-gradient-to-r ${list.coverGradient} shadow-glow` : 'bg-gradient-to-r from-rose-600 via-brand-600 to-pine-800 shadow-glow')"
     >
+      <!-- Gentle Falling Snow for Christmas lists -->
+      <SnowEffect v-if="isChristmasList" :count="22" />
+
       <!-- Background subtle elements -->
       <div class="absolute -right-12 -top-12 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+      <div v-if="isChristmasList" class="absolute -left-12 -bottom-12 w-64 h-64 bg-amber-400/15 rounded-full blur-3xl pointer-events-none" />
 
       <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div class="space-y-3 max-w-2xl">
           <!-- Emoji & Tag -->
           <div class="flex items-center gap-3">
-            <span class="text-4xl sm:text-5xl filter drop-shadow">{{ list.coverEmoji || '🎁' }}</span>
+            <span class="text-4xl sm:text-5xl filter drop-shadow animate-float">{{ list.coverEmoji || (isChristmasList ? '🎄' : '🎁') }}</span>
             <div class="flex flex-wrap items-center gap-2">
               <span
+                v-if="isChristmasList"
+                class="px-2.5 py-1 rounded-full gold-badge text-xs font-black flex items-center gap-1 uppercase tracking-wider"
+              >
+                <Sparkles class="w-3 h-3 text-amber-900" />
+                <span>Magie de Noël</span>
+              </span>
+
+              <span
                 v-if="isOwner"
-                class="px-2.5 py-1 rounded-full bg-white/90 text-rose-700 text-xs font-bold uppercase tracking-wider"
+                class="px-2.5 py-1 rounded-full bg-white/90 text-rose-800 text-xs font-bold uppercase tracking-wider shadow-sm"
               >
                 Votre Liste
               </span>
               <span
                 v-else
-                class="px-2.5 py-1 rounded-full bg-black/30 backdrop-blur-md text-white text-xs font-semibold"
+                class="px-2.5 py-1 rounded-full bg-black/35 backdrop-blur-md text-white text-xs font-semibold border border-white/10"
               >
                 Liste de {{ list.ownerName }}
               </span>
 
-              <div v-if="daysLeft !== null" class="px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-md text-amber-200 text-xs font-semibold flex items-center gap-1">
-                <Calendar class="w-3 h-3" />
-                <span v-if="daysLeft > 0">J-{{ daysLeft }}</span>
-                <span v-else-if="daysLeft === 0">Jour J ! 🎉</span>
+              <div
+                v-if="daysLeft !== null"
+                class="px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                :class="isChristmasList
+                  ? 'bg-black/35 text-amber-300 border border-amber-400/40 backdrop-blur-md'
+                  : 'bg-white/20 text-amber-200 backdrop-blur-md'"
+              >
+                <Calendar class="w-3 h-3 text-amber-300" />
+                <span v-if="daysLeft > 0">J-{{ daysLeft }} {{ isChristmasList ? 'avant Noël 🎅' : '' }}</span>
+                <span v-else-if="daysLeft === 0">C'est le grand jour ! 🎉</span>
                 <span v-else>Terminé</span>
               </div>
             </div>
           </div>
 
-          <h1 class="text-2xl sm:text-4xl font-extrabold font-display leading-tight">
-            {{ list.title }}
+          <h1 class="text-2xl sm:text-4xl font-extrabold font-display leading-tight drop-shadow-sm flex items-center gap-2 flex-wrap">
+            <span>{{ list.title }}</span>
+            <span v-if="isChristmasList" class="text-xl sm:text-2xl">✨</span>
           </h1>
 
-          <p v-if="list.description" class="text-xs sm:text-sm text-white/90 leading-relaxed max-w-xl">
+          <p v-if="list.description" class="text-xs sm:text-sm text-white/90 leading-relaxed max-w-xl font-medium">
             {{ list.description }}
           </p>
 
           <!-- Invite Code pill -->
           <div class="pt-1 flex items-center gap-2 text-xs text-white/80">
             <span>Code d'invitation :</span>
-            <span class="px-2.5 py-0.5 rounded-lg bg-black/25 font-mono font-bold tracking-wider text-amber-200">
+            <span
+              class="px-2.5 py-0.5 rounded-lg font-mono font-bold tracking-wider text-amber-200 border"
+              :class="isChristmasList ? 'bg-black/35 border-amber-400/30' : 'bg-black/25 border-transparent'"
+            >
               {{ list.inviteCode }}
             </span>
           </div>
         </div>
 
         <!-- Right Side CTA: Add Gift if Owner -->
-        <div class="shrink-0 flex flex-col items-start md:items-end gap-3">
+        <div class="shrink-0 flex flex-col items-start md:items-end gap-3 relative z-10">
           <button
             v-if="isOwner"
             @click="openAddItem"
-            class="flex items-center gap-2 py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-white text-rose-600 hover:bg-rose-50 font-bold text-xs sm:text-sm shadow-xl transition-all active:scale-95"
+            class="flex items-center gap-2 py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl font-black text-xs sm:text-sm shadow-2xl transition-all active:scale-95"
+            :class="isChristmasList
+              ? 'bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 text-amber-950 hover:from-white hover:to-amber-300 border border-amber-200 shadow-glow-gold'
+              : 'bg-white text-rose-600 hover:bg-rose-50 shadow-xl'"
           >
             <Plus class="w-4 h-4 stroke-[3]" />
-            <span>Ajouter une envie de cadeau</span>
+            <span>{{ isChristmasList ? 'Ajouter un cadeau de Noël 🎁' : 'Ajouter une envie de cadeau' }}</span>
           </button>
 
           <!-- Non-owner Secret Notice -->
-          <div v-else class="p-3.5 rounded-2xl bg-black/25 backdrop-blur-md border border-white/20 text-xs text-white/90 max-w-xs space-y-1">
-            <div class="flex items-center gap-1.5 font-bold text-amber-200">
+          <div
+            v-else
+            class="p-3.5 rounded-2xl backdrop-blur-md border text-xs max-w-xs space-y-1 shadow-lg"
+            :class="isChristmasList
+              ? 'bg-black/35 border-amber-400/30 text-amber-50'
+              : 'bg-black/25 border-white/20 text-white/90'"
+          >
+            <div class="flex items-center gap-1.5 font-bold" :class="isChristmasList ? 'text-amber-300' : 'text-amber-200'">
               <Lock class="w-3.5 h-3.5" />
-              <span>Surprise garantie !</span>
+              <span>{{ isChristmasList ? 'Secret du Père Noël garanti !' : 'Surprise garantie !' }}</span>
             </div>
-            <p class="text-[11px] text-white/80 leading-relaxed">
-              Cochez un cadeau pour indiquer aux autres membres que vous le prenez. {{ list.ownerName }} ne verra pas vos réservations.
+            <p class="text-[11px] leading-relaxed" :class="isChristmasList ? 'text-amber-100/80' : 'text-white/80'">
+              Cochez un cadeau pour indiquer à la famille que vous vous en chargez. {{ list.ownerName }} ne verra pas vos réservations secrètes.
             </p>
           </div>
         </div>
@@ -333,13 +374,13 @@ function handleShare() {
           @click="selectedRecipient = 'all'"
           class="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 border"
           :class="selectedRecipient === 'all'
-            ? 'bg-gradient-to-r from-rose-500 to-rose-600 text-white shadow-glow border-transparent'
+            ? (isChristmasList ? 'ruby-button text-white shadow-glow border-transparent' : 'bg-gradient-to-r from-rose-500 to-rose-600 text-white shadow-glow border-transparent')
             : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80'"
         >
           <span>👨‍👩‍👧‍👦 Toute la famille</span>
           <span
             class="px-2 py-0.5 rounded-full text-[10px] font-extrabold"
-            :class="selectedRecipient === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'"
+            :class="selectedRecipient === 'all' ? (isChristmasList ? 'gold-badge' : 'bg-white/20 text-white') : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'"
           >
             {{ list.items.length }}
           </span>
@@ -353,13 +394,13 @@ function handleShare() {
           @click="selectedRecipient = member.name"
           class="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 border"
           :class="selectedRecipient === member.name
-            ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md border-transparent'
+            ? (isChristmasList ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-md border-transparent' : 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md border-transparent')
             : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80'"
         >
           <span>🎁 {{ member.name }}</span>
           <span
             class="px-2 py-0.5 rounded-full text-[10px] font-extrabold"
-            :class="selectedRecipient === member.name ? 'bg-white/20 text-white' : 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400'"
+            :class="selectedRecipient === member.name ? 'bg-white/20 text-white' : (isChristmasList ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300' : 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400')"
           >
             {{ member.count }}
           </span>
@@ -369,7 +410,10 @@ function handleShare() {
         <button
           type="button"
           @click="isInviteModalOpen = true"
-          class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/80 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 border border-indigo-200/80 dark:border-indigo-800/80 transition-all shrink-0 shadow-sm"
+          class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 shadow-sm border"
+          :class="isChristmasList
+            ? 'text-amber-800 dark:text-amber-300 bg-amber-50/80 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 border-amber-200/80 dark:border-amber-800/80'
+            : 'text-indigo-600 dark:text-indigo-400 bg-indigo-50/80 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 border-indigo-200/80 dark:border-indigo-800/80'"
         >
           <Users class="w-3.5 h-3.5" />
           <span>+ Inviter un membre</span>
@@ -384,7 +428,7 @@ function handleShare() {
         <button
           @click="filterStatus = 'all'"
           class="py-1.5 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all"
-          :class="filterStatus === 'all' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
+          :class="filterStatus === 'all' ? (isChristmasList ? 'ruby-button text-white shadow-sm' : 'bg-rose-500 text-white shadow-sm') : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
         >
           Tous ({{ list.items.length }})
         </button>
@@ -392,7 +436,7 @@ function handleShare() {
         <button
           @click="filterStatus = 'favorites'"
           class="py-1.5 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1"
-          :class="filterStatus === 'favorites' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
+          :class="filterStatus === 'favorites' ? (isChristmasList ? 'ruby-button text-white shadow-sm' : 'bg-rose-500 text-white shadow-sm') : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
         >
           <Heart class="w-3 h-3 fill-current" />
           <span>Coups de cœur</span>
@@ -402,7 +446,7 @@ function handleShare() {
           v-if="!isOwner"
           @click="filterStatus = 'available'"
           class="py-1.5 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all"
-          :class="filterStatus === 'available' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
+          :class="filterStatus === 'available' ? (isChristmasList ? 'ruby-button text-white shadow-sm' : 'bg-rose-500 text-white shadow-sm') : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
         >
           Disponibles ({{ list.items.filter(i => !i.isPurchased).length }})
         </button>
@@ -411,7 +455,7 @@ function handleShare() {
           v-if="!isOwner"
           @click="filterStatus = 'purchased'"
           class="py-1.5 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all"
-          :class="filterStatus === 'purchased' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
+          :class="filterStatus === 'purchased' ? (isChristmasList ? 'ruby-button text-white shadow-sm' : 'bg-rose-500 text-white shadow-sm') : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'"
         >
           Réservés ({{ list.items.filter(i => i.isPurchased).length }})
         </button>
@@ -431,7 +475,7 @@ function handleShare() {
 
         <div v-if="totalBudget > 0" class="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold">
           <span>Total :</span>
-          <span class="text-rose-600 dark:text-rose-400">~{{ totalBudget.toFixed(2) }} €</span>
+          <span :class="isChristmasList ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'">~{{ totalBudget.toFixed(2) }} €</span>
         </div>
       </div>
     </div>
@@ -444,6 +488,7 @@ function handleShare() {
         :item="item"
         :is-owner="isOwner"
         :owner-name="list.ownerName"
+        :is-christmas="isChristmasList"
         @edit="handleEditItem"
         @delete="handleDeleteItem"
       />
@@ -454,24 +499,32 @@ function handleShare() {
       v-else
       class="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 p-10 sm:p-14 text-center max-w-md mx-auto space-y-4"
     >
-      <div class="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/60 text-rose-500 flex items-center justify-center text-3xl mx-auto shadow-inner">
-        ✨
+      <div
+        class="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto shadow-inner"
+        :class="isChristmasList ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600' : 'bg-rose-100 dark:bg-rose-950/60 text-rose-500'"
+      >
+        {{ isChristmasList ? '🎄' : '✨' }}
       </div>
       <div>
         <h3 class="text-lg font-bold font-display text-slate-900 dark:text-white">
-          {{ isOwner ? 'Votre liste est encore vide' : 'Aucun cadeau trouvé' }}
+          {{ isChristmasList ? (isOwner ? 'Votre hotte de Noël est encore vide' : 'Aucun cadeau de Noël trouvé') : (isOwner ? 'Votre liste est encore vide' : 'Aucun cadeau trouvé') }}
         </h3>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          {{ isOwner ? 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !' : 'Aucun cadeau ne correspond aux filtres actuels.' }}
+        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+          {{ isOwner
+            ? (isChristmasList ? 'Ajoutez vos premières envies de cadeaux pour que vos proches puissent les préparer pour Noël !' : 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !')
+            : 'Aucun cadeau ne correspond aux filtres actuels.'
+          }}
         </p>
       </div>
 
       <button
         v-if="isOwner"
         @click="openAddItem"
-        class="py-2.5 px-5 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl text-xs font-bold shadow-glow transition-all"
+        class="py-2.5 px-5 text-white rounded-2xl text-xs font-bold shadow-glow transition-all active:scale-95 inline-flex items-center gap-1.5"
+        :class="isChristmasList ? 'ruby-button' : 'bg-rose-500 hover:bg-rose-600'"
       >
-        + Ajouter mon premier cadeau
+        <Plus class="w-4 h-4" />
+        <span>{{ isChristmasList ? 'Ajouter une envie de Noël 🎁' : '+ Ajouter mon premier cadeau' }}</span>
       </button>
     </div>
 
