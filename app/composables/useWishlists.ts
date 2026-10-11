@@ -19,28 +19,26 @@ export function useWishlists() {
   })
 
   const familyLists = computed(() => {
-    if (!currentUser.value) return lists.value
-    return lists.value.filter(l => {
-      // Lists owned by others that I have joined or are shared
-      return l.ownerId !== currentUser.value?.id && (
-        l.members.includes(currentUser.value?.id || '') ||
-        currentUser.value?.joinedListIds.includes(l.id) ||
-        currentUser.value?.joinedListIds.includes(l.inviteCode)
-      )
-    })
-  })
-
-  const otherExploreLists = computed(() => {
     if (!currentUser.value) return []
     return lists.value.filter(l => {
-      return l.ownerId !== currentUser.value?.id &&
-        !l.members.includes(currentUser.value?.id || '') &&
-        !currentUser.value?.joinedListIds.includes(l.id)
+      // Lists owned by others that I have joined or am a member of
+      const isOwner = l.ownerId === currentUser.value?.id
+      if (isOwner) return false
+
+      const isMember = Array.isArray(l.members) && l.members.some((m: any) => {
+        if (typeof m === 'string') return m === currentUser.value?.id
+        return m?.id === currentUser.value?.id || (m?.name && m?.name.toLowerCase() === currentUser.value?.name.toLowerCase())
+      })
+      const isJoined = (currentUser.value?.joinedListIds || []).includes(l.id) ||
+        (currentUser.value?.joinedListIds || []).map(x => x.toUpperCase()).includes(l.inviteCode.toUpperCase())
+
+      return isMember || isJoined
     })
   })
 
   const filteredLists = computed(() => {
-    let result = lists.value
+    if (!currentUser.value) return []
+    let result = [...myLists.value, ...familyLists.value]
 
     if (selectedCategory.value !== 'all') {
       result = result.filter(l => l.category === selectedCategory.value)
@@ -59,9 +57,21 @@ export function useWishlists() {
   })
 
   async function fetchLists() {
+    if (!currentUser.value) {
+      lists.value = []
+      return
+    }
+
     isLoading.value = true
     try {
-      const data = await $fetch<Wishlist[]>('/api/lists')
+      const query: Record<string, string> = {
+        userId: currentUser.value.id
+      }
+      if (currentUser.value.joinedListIds && currentUser.value.joinedListIds.length > 0) {
+        query.joinedIds = currentUser.value.joinedListIds.join(',')
+      }
+
+      const data = await $fetch<Wishlist[]>('/api/lists', { query })
       if (data && Array.isArray(data)) {
         lists.value = data
         if (import.meta.client) {
@@ -72,11 +82,31 @@ export function useWishlists() {
       if (import.meta.client) {
         const cached = localStorage.getItem('famwish_lists_cache')
         if (cached) {
-          lists.value = JSON.parse(cached)
+          try {
+            lists.value = JSON.parse(cached)
+          } catch (_) {}
         }
       }
     } finally {
       isLoading.value = false
+    }
+  }
+
+  async function fetchListById(idOrCode: string): Promise<Wishlist | null> {
+    try {
+      const data = await $fetch<Wishlist>(`/api/lists/${encodeURIComponent(idOrCode)}`)
+      if (data) {
+        const index = lists.value.findIndex(l => l.id === data.id)
+        if (index >= 0) {
+          lists.value[index] = data
+        } else {
+          lists.value.push(data)
+        }
+        return data
+      }
+      return null
+    } catch (err) {
+      return getList(idOrCode) || null
     }
   }
 
@@ -383,9 +413,9 @@ export function useWishlists() {
     selectedCategory,
     myLists,
     familyLists,
-    otherExploreLists,
     filteredLists,
     fetchLists,
+    fetchListById,
     getList,
     createList,
     updateList,

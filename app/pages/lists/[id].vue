@@ -26,7 +26,7 @@ import type { Wishlist, WishlistItem } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
-const { getList, fetchLists, deleteList, deleteItem } = useWishlists()
+const { getList, fetchLists, fetchListById, deleteList, deleteItem } = useWishlists()
 const { currentUser, joinListId } = useAuth()
 const toast = useToast()
 
@@ -86,10 +86,13 @@ const recipientsList = computed(() => {
 })
 
 if (import.meta.server || !list.value) {
-  await fetchLists()
+  await fetchListById(listId.value)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (!list.value) {
+    await fetchListById(listId.value)
+  }
   if (list.value && currentUser.value) {
     joinListId(list.value.id)
     joinListId(list.value.inviteCode)

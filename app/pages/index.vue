@@ -46,6 +46,8 @@ const categories: { key: WishlistCategory | 'all'; label: string; emoji: string 
 ]
 
 const displayedLists = computed(() => {
+  if (!currentUser.value) return []
+
   let source = lists.value
 
   if (activeTab.value === 'my') {
@@ -110,15 +112,23 @@ const totalReservedCount = computed(() => {
             class="flex items-center gap-2 py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-white text-rose-600 hover:bg-rose-50 font-bold text-xs sm:text-sm shadow-xl transition-all active:scale-95"
           >
             <Plus class="w-4 h-4 stroke-[3]" />
-            <span>Créer ma liste de souhaits</span>
+            <span>Créer une liste de souhaits</span>
           </button>
 
-          <button
-            @click="openScannerModal?.()"
+          <NuxtLink
+            to="/join"
             class="flex items-center gap-2 py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-white/15 hover:bg-white/25 backdrop-blur-md text-white border border-white/30 font-bold text-xs sm:text-sm transition-all active:scale-95"
           >
             <QrCode class="w-4 h-4 text-amber-200" />
-            <span>Rejoindre via QR Code</span>
+            <span>Rejoindre avec un code / QR</span>
+          </NuxtLink>
+
+          <button
+            v-if="!currentUser"
+            @click="openAuthModal?.()"
+            class="flex items-center gap-2 py-3 px-4 rounded-2xl bg-black/20 hover:bg-black/30 backdrop-blur-md text-rose-100 border border-white/20 font-bold text-xs sm:text-sm transition-all"
+          >
+            <span>Se connecter</span>
           </button>
         </div>
 
@@ -126,134 +136,219 @@ const totalReservedCount = computed(() => {
         <div class="flex flex-wrap items-center gap-4 sm:gap-6 pt-4 border-t border-white/15 text-xs text-rose-100/80 font-medium">
           <div class="flex items-center gap-1.5">
             <Lock class="w-3.5 h-3.5 text-amber-300" />
-            <span>Réservations 100% secrètes</span>
+            <span>Listes 100% privées & réservations secrètes</span>
           </div>
           <div class="flex items-center gap-1.5">
             <ShieldCheck class="w-3.5 h-3.5 text-emerald-300" />
-            <span>Connexion Google & PWA offline</span>
+            <span>Connexion Google & PWA hors-ligne</span>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div v-if="currentUser" class="flex items-center gap-1.5">
             <Gift class="w-3.5 h-3.5 text-rose-300" />
-            <span>{{ totalReservedCount }} cadeaux réservés en secret</span>
+            <span>{{ totalReservedCount }} cadeaux réservés</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Filter Bar & Search -->
-    <div class="space-y-4">
-      <!-- Top Filters: Tabs (Toutes / Mes listes / Famille) + Search -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <!-- Tabs Switcher -->
-        <div class="flex p-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm shrink-0">
-          <button
-            @click="activeTab = 'all'"
-            class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-            :class="activeTab === 'all'
-              ? 'bg-rose-500 text-white shadow-glow'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-          >
-            <span>Toutes les listes</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'all' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
-              {{ lists.length }}
-            </span>
-          </button>
-
-          <button
-            @click="activeTab = 'my'"
-            class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-            :class="activeTab === 'my'
-              ? 'bg-rose-500 text-white shadow-glow'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-          >
-            <span>Mes Listes</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'my' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
-              {{ myLists.length }}
-            </span>
-          </button>
-
-          <button
-            @click="activeTab = 'family'"
-            class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-            :class="activeTab === 'family'
-              ? 'bg-rose-500 text-white shadow-glow'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-          >
-            <span>Famille & Amis</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'family' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
-              {{ familyLists.length }}
-            </span>
-          </button>
+    <!-- Logged out View: Access Gate Cards -->
+    <div v-if="!currentUser" class="space-y-6">
+      <div class="p-8 sm:p-10 rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/80 dark:border-slate-800 shadow-xl space-y-6">
+        <div class="max-w-2xl space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-bold">
+            <Lock class="w-3.5 h-3.5" />
+            <span>Espace Privé & Sécurisé</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-black font-display text-slate-900 dark:text-white">
+            Vos listes de famille sont protégées
+          </h2>
+          <p class="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+            Pour préserver l'intimité et la surprise de Noël, chaque famille ne voit que ses propres listes et celles qu'elle a rejointes via un lien d'invitation ou QR code.
+          </p>
         </div>
 
-        <!-- Search input box -->
-        <div class="relative flex-1 max-w-md">
-          <Search class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Rechercher une liste, un membre, un cadeau..."
-            class="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
-          />
-        </div>
-      </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Card 1: Create List without login -->
+          <div
+            @click="openCreateListModal?.()"
+            class="group p-6 rounded-2xl bg-gradient-to-br from-rose-50 to-amber-50/50 dark:from-slate-800/80 dark:to-slate-800/40 border border-rose-200/60 dark:border-slate-700/80 hover:border-rose-400 dark:hover:border-rose-500 cursor-pointer transition-all shadow-sm hover:shadow-md space-y-3"
+          >
+            <div class="w-12 h-12 rounded-2xl bg-rose-500 text-white flex items-center justify-center text-xl shadow-glow group-hover:scale-105 transition-transform">
+              ✨
+            </div>
+            <h3 class="font-bold text-slate-900 dark:text-white text-base">
+              Créer une liste
+            </h3>
+            <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Commencez immédiatement sans mot de passe : indiquez votre prénom et préparez vos souhaits de Noël.
+            </p>
+            <div class="pt-2 flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 group-hover:translate-x-1 transition-transform">
+              <span>Créer ma première liste</span>
+              <ArrowRight class="w-4 h-4" />
+            </div>
+          </div>
 
-      <!-- Categories Pills Horizontal scroll -->
-      <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-        <button
-          v-for="cat in categories"
-          :key="cat.key"
-          @click="selectedCategory = cat.key"
-          class="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-semibold whitespace-nowrap transition-all border shrink-0"
-          :class="selectedCategory === cat.key
-            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
-            : 'bg-white/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-800 hover:border-slate-300'"
-        >
-          <span>{{ cat.emoji }}</span>
-          <span>{{ cat.label }}</span>
-        </button>
+          <!-- Card 2: Join List via code / link -->
+          <NuxtLink
+            to="/join"
+            class="group p-6 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50/50 dark:from-slate-800/80 dark:to-slate-800/40 border border-amber-200/60 dark:border-slate-700/80 hover:border-amber-400 dark:hover:border-amber-500 cursor-pointer transition-all shadow-sm hover:shadow-md space-y-3 block"
+          >
+            <div class="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center text-xl shadow-glow group-hover:scale-105 transition-transform">
+              💌
+            </div>
+            <h3 class="font-bold text-slate-900 dark:text-white text-base">
+              Rejoindre une liste
+            </h3>
+            <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Un proche vous a envoyé un code ou un QR Code ? Saisissez-le pour consulter ses idées cadeaux.
+            </p>
+            <div class="pt-2 flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 group-hover:translate-x-1 transition-transform">
+              <span>Entrer le code ou scanner</span>
+              <ArrowRight class="w-4 h-4" />
+            </div>
+          </NuxtLink>
+
+          <!-- Card 3: Connect -->
+          <div
+            @click="openAuthModal?.()"
+            class="group p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-sky-50/50 dark:from-slate-800/80 dark:to-slate-800/40 border border-slate-200 dark:border-slate-700/80 hover:border-sky-400 dark:hover:border-sky-500 cursor-pointer transition-all shadow-sm hover:shadow-md space-y-3"
+          >
+            <div class="w-12 h-12 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center text-xl shadow-glow group-hover:scale-105 transition-transform">
+              🔐
+            </div>
+            <h3 class="font-bold text-slate-900 dark:text-white text-base">
+              Se connecter
+            </h3>
+            <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Connectez-vous avec Google ou votre profil pour retrouver toutes vos listes créées et rejointes.
+            </p>
+            <div class="pt-2 flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:translate-x-1 transition-transform">
+              <span>Connexion en 1 clic</span>
+              <ArrowRight class="w-4 h-4" />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Wishlists Grid -->
-    <div v-if="displayedLists.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <ListCard
-        v-for="list in displayedLists"
-        :key="list.id"
-        :list="list"
-        @share="openShareModal?.(list)"
-      />
-    </div>
+    <!-- Logged in View: Lists Dashboard -->
+    <div v-else class="space-y-6">
+      <!-- Filter Bar & Search -->
+      <div class="space-y-4">
+        <!-- Top Filters: Tabs (Toutes / Mes listes / Famille) + Search -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <!-- Tabs Switcher -->
+          <div class="flex p-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm shrink-0">
+            <button
+              @click="activeTab = 'all'"
+              class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              :class="activeTab === 'all'
+                ? 'bg-rose-500 text-white shadow-glow'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+            >
+              <span>Toutes mes listes</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'all' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
+                {{ lists.length }}
+              </span>
+            </button>
 
-    <!-- Empty State -->
-    <div
-      v-else
-      class="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 p-10 sm:p-16 text-center max-w-lg mx-auto space-y-4"
-    >
-      <div class="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/60 text-rose-500 flex items-center justify-center text-3xl mx-auto shadow-inner">
-        🎁
+            <button
+              @click="activeTab = 'my'"
+              class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              :class="activeTab === 'my'
+                ? 'bg-rose-500 text-white shadow-glow'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+            >
+              <span>Mes Listes</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'my' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
+                {{ myLists.length }}
+              </span>
+            </button>
+
+            <button
+              @click="activeTab = 'family'"
+              class="py-2 px-3 sm:px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              :class="activeTab === 'family'
+                ? 'bg-rose-500 text-white shadow-glow'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+            >
+              <span>Famille & Amis</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="activeTab === 'family' ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-800'">
+                {{ familyLists.length }}
+              </span>
+            </button>
+          </div>
+
+          <!-- Search input box -->
+          <div class="relative flex-1 max-w-md">
+            <Search class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="Rechercher une liste, un membre, un cadeau..."
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+            />
+          </div>
+        </div>
+
+        <!-- Categories Pills Horizontal scroll -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            v-for="cat in categories"
+            :key="cat.key"
+            @click="selectedCategory = cat.key"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-semibold whitespace-nowrap transition-all border shrink-0"
+            :class="selectedCategory === cat.key
+              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
+              : 'bg-white/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-800 hover:border-slate-300'"
+          >
+            <span>{{ cat.emoji }}</span>
+            <span>{{ cat.label }}</span>
+          </button>
+        </div>
       </div>
-      <div>
-        <h3 class="text-lg font-bold font-display text-slate-900 dark:text-white">Aucune liste trouvée</h3>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
-          {{ searchQuery ? `Aucun résultat pour "${searchQuery}". Essayez un autre mot clé.` : 'Créez votre première liste de souhaits ou rejoignez celle d’un proche !' }}
-        </p>
+
+      <!-- Wishlists Grid -->
+      <div v-if="displayedLists.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <ListCard
+          v-for="list in displayedLists"
+          :key="list.id"
+          :list="list"
+          @share="openShareModal?.(list)"
+        />
       </div>
 
-      <div class="flex items-center justify-center gap-3 pt-2">
-        <button
-          @click="openCreateListModal?.()"
-          class="py-2.5 px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-glow transition-all"
-        >
-          + Créer une liste
-        </button>
+      <!-- Empty State for logged in user -->
+      <div
+        v-else
+        class="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 p-10 sm:p-16 text-center max-w-lg mx-auto space-y-4"
+      >
+        <div class="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/60 text-rose-500 flex items-center justify-center text-3xl mx-auto shadow-inner">
+          🎁
+        </div>
+        <div>
+          <h3 class="text-lg font-bold font-display text-slate-900 dark:text-white">
+            {{ searchQuery ? 'Aucune liste correspondante' : 'Aucune liste pour le moment' }}
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+            {{ searchQuery ? `Aucun résultat pour "${searchQuery}". Essayez un autre terme.` : 'Créez votre première liste de souhaits de Noël ou rejoignez la liste partagée par un proche !' }}
+          </p>
+        </div>
 
-        <button
-          @click="openScannerModal?.()"
-          class="py-2.5 px-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors"
-        >
-          Scanner un QR Code
-        </button>
+        <div class="flex items-center justify-center gap-3 pt-2">
+          <button
+            @click="openCreateListModal?.()"
+            class="py-2.5 px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-glow transition-all"
+          >
+            + Créer une liste
+          </button>
+
+          <NuxtLink
+            to="/join"
+            class="py-2.5 px-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors"
+          >
+            Rejoindre avec un code
+          </NuxtLink>
+        </div>
       </div>
     </div>
 

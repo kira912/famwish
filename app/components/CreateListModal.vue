@@ -17,7 +17,7 @@ const emit = defineEmits<{
 }>()
 
 const { createList, updateList } = useWishlists()
-const { currentUser, createCustomUser } = useAuth()
+const { currentUser, createCustomUser, openAuthModal } = useAuth()
 const router = useRouter()
 
 const isSubmitting = ref(false)
@@ -193,17 +193,29 @@ async function handleSubmit() {
           </div>
 
           <!-- User Name input if not logged in -->
-          <div v-if="!currentUser && !editingList">
-            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-              Votre prénom (créateur de la liste) *
-            </label>
+          <div v-if="!currentUser && !editingList" class="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                Votre prénom (créateur de la liste) *
+              </label>
+              <button
+                type="button"
+                @click="openAuthModal"
+                class="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline"
+              >
+                Se connecter
+              </button>
+            </div>
             <input
               v-model="ownerName"
               type="text"
               required
-              placeholder="Ex: Sophie, Papa, Thomas..."
-              class="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-900 dark:text-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
+              placeholder="Ex: Sophie, Papa, Valentin..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
             />
+            <p class="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-tight">
+              Ce prénom sera affiché comme propriétaire de la liste pour vos proches.
+            </p>
           </div>
 
           <!-- Description -->

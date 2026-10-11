@@ -4,22 +4,61 @@ import { getPgPool, initPostgresSchema, mapRowToWishlist, mapRowToWishlistItem }
 // In-memory fallback store when PostgreSQL is not configured
 let listsStore: Wishlist[] = []
 
-// Fetch all lists
-export async function getLists(): Promise<Wishlist[]> {
+// Fetch lists for a specific user (their own lists + joined lists)
+export async function getLists(userId?: string, joinedIds: string[] = []): Promise<Wishlist[]> {
+  const cleanUserId = userId ? userId.trim() : null
+  const cleanJoinedIds = Array.isArray(joinedIds) ? joinedIds.map(s => s.trim()).filter(Boolean) : []
+  const cleanUpperJoinedCodes = cleanJoinedIds.map(s => s.toUpperCase())
+
+  // If no user is identified and no joined lists provided, return empty array to protect privacy
+  if (!cleanUserId && cleanJoinedIds.length === 0) {
+    return []
+  }
+
   const pool = getPgPool()
   if (pool) {
     await initPostgresSchema()
-    const { rows: listRows } = await pool.query('SELECT * FROM wishlists ORDER BY created_at DESC')
+    const query = `
+      SELECT * FROM wishlists
+      WHERE ($1::text IS NOT NULL AND owner_id = $1)
+         OR ($1::text IS NOT NULL AND members::text LIKE ('%' || $1 || '%'))
+         OR id = ANY($2::text[])
+         OR UPPER(invite_code) = ANY($3::text[])
+      ORDER BY created_at DESC
+    `
+    const { rows: listRows } = await pool.query(query, [
+      cleanUserId,
+      cleanJoinedIds,
+      cleanUpperJoinedCodes
+    ])
     if (listRows.length === 0) {
       return []
     }
-    const { rows: itemRows } = await pool.query('SELECT * FROM wishlist_items ORDER BY created_at ASC')
+    const listIds = listRows.map(r => r.id)
+    const { rows: itemRows } = await pool.query(
+      'SELECT * FROM wishlist_items WHERE list_id = ANY($1::text[]) ORDER BY created_at ASC',
+      [listIds]
+    )
     return listRows.map(row => {
       const items = itemRows.filter(i => i.list_id === row.id).map(mapRowToWishlistItem)
       return mapRowToWishlist(row, items)
     })
   }
-  return listsStore
+
+  return listsStore.filter(l => {
+    const isOwner = Boolean(cleanUserId && l.ownerId === cleanUserId)
+    const isMember = Boolean(cleanUserId && (
+      (Array.isArray(l.members) && l.members.some((m: any) => {
+        if (typeof m === 'string') return m === cleanUserId || m.toLowerCase() === cleanUserId.toLowerCase()
+        return m?.id === cleanUserId || (m?.name && m?.name.toLowerCase() === cleanUserId.toLowerCase())
+      }))
+    ))
+    const isJoined = cleanJoinedIds.some(id => 
+      id.toLowerCase() === l.id.toLowerCase() || 
+      id.toUpperCase() === l.inviteCode.toUpperCase()
+    )
+    return isOwner || isMember || isJoined
+  })
 }
 
 // Fetch single list by ID or Invite Code

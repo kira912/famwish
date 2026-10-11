@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useAuth } from '~/composables/useAuth'
 import { useWishlists } from '~/composables/useWishlists'
 import { usePwa } from '~/composables/usePwa'
 import { useTheme } from '~/composables/useTheme'
 import type { Wishlist } from '~/types'
 
-const { initAuth } = useAuth()
+const { currentUser, initAuth } = useAuth()
 const { fetchLists } = useWishlists()
 const { initPwa } = usePwa()
 const { initTheme } = useTheme()
@@ -20,6 +20,10 @@ onMounted(async () => {
   initTheme()
   initAuth()
   initPwa()
+  await fetchLists()
+})
+
+watch(currentUser, async () => {
   await fetchLists()
 })
 
