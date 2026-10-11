@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import {
   X,
   Download,
@@ -11,7 +12,8 @@ import {
   CheckCircle2,
   Smartphone,
   MoreVertical,
-  Laptop
+  Laptop,
+  ArrowRight
 } from 'lucide-vue-next'
 import { usePwa } from '~/composables/usePwa'
 
@@ -25,14 +27,26 @@ const {
   dismissInstall
 } = usePwa()
 
-async function handleInstall() {
+const showGuide = ref(false)
+
+async function handleInstallShortcut() {
   if (isInstallable.value) {
     const installed = await promptInstall()
     if (installed) {
       dismissInstall()
     }
+  } else if (isIos.value && typeof navigator !== 'undefined' && 'share' in navigator) {
+    try {
+      await navigator.share({
+        title: 'FamWish - Listes de souhaits de Noël',
+        text: 'Ajoutez le raccourci FamWish sur votre écran d\'accueil pour retrouver facilement vos cadeaux de Noël !',
+        url: window.location.origin
+      })
+    } catch (e) {
+      showGuide.value = true
+    }
   } else {
-    dismissInstall()
+    showGuide.value = true
   }
 }
 </script>
@@ -77,14 +91,14 @@ async function handleInstall() {
 
           <div class="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold text-white mb-1.5">
             <Sparkles class="w-3.5 h-3.5 text-amber-300" />
-            <span>Application Gratuite & Sans Téléchargement</span>
+            <span>Raccourci Écran d'accueil Rapide</span>
           </div>
 
           <h3 class="text-xl sm:text-2xl font-black font-display tracking-tight text-white">
-            Installez FamWish
+            Installer le raccourci FamWish
           </h3>
           <p class="text-xs sm:text-sm text-rose-100 mt-1 max-w-sm mx-auto">
-            Accédez à vos listes de Noël et d'anniversaires en 1 clic directement depuis votre écran d'accueil.
+            Retrouvez vos listes de Noël et vos idées cadeaux directement sur votre écran d'accueil comme une vraie application.
           </p>
         </div>
 
@@ -97,8 +111,8 @@ async function handleInstall() {
                 <Zap class="w-4 h-4" />
               </div>
               <div>
-                <p class="text-xs font-bold text-slate-800 dark:text-slate-100">Accès instantané & fluide</p>
-                <p class="text-[11px] text-slate-500 dark:text-slate-400">Lancez l'app sans passer par la barre d'adresse de votre navigateur.</p>
+                <p class="text-xs font-bold text-slate-800 dark:text-slate-100">Accès instantané en 1 clic</p>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400">Lancez FamWish directement depuis votre écran d'accueil sans passer par le navigateur.</p>
               </div>
             </div>
 
@@ -120,16 +134,16 @@ async function handleInstall() {
               </div>
               <div>
                 <p class="text-xs font-bold text-slate-800 dark:text-slate-100">Pratique dans les magasins</p>
-                <p class="text-[11px] text-slate-500 dark:text-slate-400">Consultez vos listes même quand le réseau mobile est faible.</p>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400">Consultez vos listes même quand la connexion réseau est limitée.</p>
               </div>
             </div>
           </div>
 
           <!-- iOS specific instructions -->
-          <div v-if="isIos" class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+          <div v-if="isIos || showGuide" class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
             <div class="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-bold text-xs">
               <Smartphone class="w-4 h-4 text-amber-600" />
-              <span>Comment installer sur iPhone / iPad :</span>
+              <span>Comment ajouter le raccourci sur iPhone / iPad :</span>
             </div>
             <ol class="text-xs text-amber-900/80 dark:text-amber-300/80 space-y-1.5 pl-1">
               <li class="flex items-center gap-2">
@@ -148,36 +162,25 @@ async function handleInstall() {
           </div>
 
           <!-- Android / Desktop browser instructions when beforeinstallprompt is not direct -->
-          <div v-else-if="!isInstallable" class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+          <div v-else-if="!isInstallable && !isIos" class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
             <div class="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-bold text-xs">
               <MoreVertical class="w-4 h-4 text-amber-600" />
-              <span>Installation rapide :</span>
+              <span>Ajouter le raccourci sur Android ou PC :</span>
             </div>
             <p class="text-xs text-amber-900/80 dark:text-amber-300/80 leading-relaxed">
-              Dans le menu de votre navigateur (<strong>⋮</strong> en haut à droite sur Chrome/Android ou l'icône d'installation dans la barre d'adresse sur PC), choisissez <strong>"Installer l'application"</strong> ou <strong>"Ajouter à l'écran d'accueil"</strong>.
+              Dans le menu de votre navigateur (<strong>⋮</strong> en haut à droite sur Chrome ou l'icône d'ordinateur dans la barre d'adresse), cliquez sur <strong>"Installer l'application"</strong> ou <strong>"Ajouter à l'écran d'accueil"</strong>.
             </p>
           </div>
 
           <!-- Actions -->
           <div class="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
-            <!-- If installable via native prompt event -->
+            <!-- Shortcut install button -->
             <button
-              v-if="isInstallable"
-              @click="handleInstall"
+              @click="handleInstallShortcut"
               class="w-full sm:flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:from-rose-700 hover:to-amber-600 text-white font-bold text-sm shadow-glow flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
             >
-              <Download class="w-4 h-4" />
-              <span>Installer l'application en 1 clic</span>
-            </button>
-
-            <!-- For iOS or manual guide: Got it button -->
-            <button
-              v-else
-              @click="dismissInstall"
-              class="w-full sm:flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-700 hover:to-rose-800 text-white font-bold text-sm shadow-glow flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-            >
-              <CheckCircle2 class="w-4 h-4" />
-              <span>J'ai compris !</span>
+              <Smartphone class="w-4 h-4" />
+              <span>Installer le raccourci</span>
             </button>
 
             <!-- Dismiss button -->
