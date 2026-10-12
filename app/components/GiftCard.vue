@@ -60,14 +60,16 @@ const domainName = computed(() => {
 
 // Check if this gift is intended for the logged-in user or list owner
 const isItemForMe = computed(() => {
-  const currentName = currentUser.value?.name?.trim().toLowerCase()
-  const recName = (props.item.recipientName || props.ownerName || '').trim().toLowerCase()
+  const currentName = currentUser.value?.name ? String(currentUser.value.name).trim().toLowerCase() : ''
+  const itemRec = typeof props.item.recipientName === 'string' ? props.item.recipientName.trim() : ''
+  const owner = typeof props.ownerName === 'string' ? props.ownerName.trim() : ''
+  const recName = (itemRec || owner).toLowerCase()
   
   if (currentName && recName && (currentName === recName || recName === 'moi')) {
     return true
   }
   
-  if (props.isOwner && (!props.item.recipientName || props.item.recipientName.trim().toLowerCase() === props.ownerName.trim().toLowerCase())) {
+  if (props.isOwner && (!itemRec || itemRec.toLowerCase() === owner.toLowerCase())) {
     return true
   }
 
@@ -233,11 +235,6 @@ async function handleCancelReservation() {
           </h4>
         </div>
 
-        <!-- Description if available -->
-        <p v-if="item.description" class="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mb-2 leading-relaxed">
-          {{ item.description }}
-        </p>
-
         <!-- Custom Details: Color / Variant Tag -->
         <div v-if="item.colorOrVariant" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-medium mb-2">
           <Palette class="w-3 h-3 text-rose-500" />
@@ -273,22 +270,9 @@ async function handleCancelReservation() {
           <ExternalLink class="w-3.5 h-3.5 group-hover/link:translate-x-0.5 transition-transform" />
         </a>
 
-        <!-- Anti-Spoiler Box: Secret préservé si le cadeau est pour moi -->
-        <div
-          v-if="isItemForMe"
-          class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-[11px] flex items-center justify-between"
-        >
-          <div class="flex items-center gap-1.5">
-            <Lock class="w-3.5 h-3.5 text-rose-400" />
-            <span>Secret des réservations protégé 🤫</span>
-          </div>
-          <span class="text-[10px] text-slate-400">Surprise garantie</span>
-        </div>
-
-        <!-- Non-Recipient: Secret Purchase & Reservation Buttons -->
-        <div v-else class="pt-1">
+        <div class="pt-1">
           <!-- Item Not Purchased Yet -->
-          <div v-if="!item.isPurchased">
+          <div v-if="!item.isPurchased && !isItemForMe">
             <button
               v-if="!showReserveDialog"
               @click="showReserveDialog = true"
@@ -367,7 +351,7 @@ async function handleCancelReservation() {
           </div>
 
           <!-- Item Already Purchased -->
-          <div v-else class="space-y-1.5">
+          <div v-if="item.isPurchased" class="space-y-1.5">
             <div class="p-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-center">
               <span class="text-xs font-bold text-emerald-800 dark:text-emerald-300 block">
                 {{ item.purchasedBy?.isAnonymous ? '🎁 Déjà pris en charge en secret' : `🎁 Réservé par ${item.purchasedBy?.name || 'un proche'}` }}

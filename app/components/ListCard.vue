@@ -28,13 +28,13 @@ const isChristmas = computed(() => {
 // Distinct family members in this list
 const distinctRecipients = computed(() => {
   const set = new Set<string>()
-  if (props.list.ownerName) set.add(props.list.ownerName)
+  if (props.list.ownerName) set.add(String(props.list.ownerName).trim())
   props.list.items.forEach(i => {
-    if (i.recipientName && i.recipientName.trim()) {
+    if (typeof i.recipientName === 'string' && i.recipientName.trim()) {
       set.add(i.recipientName.trim())
     }
   })
-  return Array.from(set)
+  return Array.from(set).filter(Boolean)
 })
 
 const purchasedCount = computed(() => {

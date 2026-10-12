@@ -71,7 +71,8 @@ const recipientsList = computed(() => {
   map.set(owner, { name: owner, count: 0, availableCount: 0 })
 
   list.value.items.forEach(i => {
-    const recName = (i.recipientName && i.recipientName.trim()) ? i.recipientName.trim() : owner
+    const rawRec = typeof i.recipientName === 'string' ? i.recipientName.trim() : ''
+    const recName = rawRec || owner
     if (!map.has(recName)) {
       map.set(recName, { name: recName, count: 0, availableCount: 0 })
     }
@@ -106,7 +107,8 @@ const filteredItems = computed(() => {
   // Filter by family member / recipient
   if (selectedRecipient.value !== 'all') {
     items = items.filter(i => {
-      const rec = (i.recipientName && i.recipientName.trim()) ? i.recipientName.trim() : list.value!.ownerName
+      const rawRec = typeof i.recipientName === 'string' ? i.recipientName.trim() : ''
+      const rec = rawRec || list.value!.ownerName
       return rec.toLowerCase() === selectedRecipient.value.toLowerCase()
     })
   }
@@ -148,12 +150,14 @@ const daysLeft = computed(() => {
 
 function openAddItem(recipientName?: string) {
   itemToEdit.value = null
-  if (recipientName && recipientName !== 'all') {
+  if (typeof recipientName === 'string' && recipientName && recipientName !== 'all') {
     defaultAddRecipient.value = recipientName
-  } else if (selectedRecipient.value !== 'all') {
+  } else if (currentUser.value?.name) {
+    defaultAddRecipient.value = currentUser.value.name
+  } else if (typeof selectedRecipient.value === 'string' && selectedRecipient.value !== 'all') {
     defaultAddRecipient.value = selectedRecipient.value
   } else {
-    defaultAddRecipient.value = currentUser.value?.name || list.value?.ownerName || ''
+    defaultAddRecipient.value = list.value?.ownerName || ''
   }
   isAddItemOpen.value = true
 }
@@ -308,7 +312,7 @@ function handleShare() {
         <div class="shrink-0 flex flex-col items-start md:items-end gap-3 relative z-10">
           <button
             v-if="isOwner"
-            @click="openAddItem"
+            @click="openAddItem()"
             class="flex items-center gap-2 py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl font-black text-xs sm:text-sm shadow-2xl transition-all active:scale-95"
             :class="isChristmasList
               ? 'bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 text-amber-950 hover:from-white hover:to-amber-300 border border-amber-200 shadow-glow-gold'
@@ -522,7 +526,7 @@ function handleShare() {
 
       <button
         v-if="isOwner"
-        @click="openAddItem"
+        @click="openAddItem()"
         class="py-2.5 px-5 text-white rounded-2xl text-xs font-bold shadow-glow transition-all active:scale-95 inline-flex items-center gap-1.5"
         :class="isChristmasList ? 'ruby-button' : 'bg-rose-500 hover:bg-rose-600'"
       >

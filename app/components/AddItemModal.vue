@@ -40,21 +40,28 @@ const toast = useToast()
 
 const currentList = computed(() => getList(props.listId))
 
+// Helper to get string safely
+function ensureString(val: unknown): string {
+  if (typeof val === 'string') return val
+  if (val === null || val === undefined) return ''
+  return ''
+}
+
 // Existing recipients in this list
 const existingRecipients = computed(() => {
   const set = new Set<string>()
-  if (currentList.value?.ownerName) {
-    set.add(currentList.value.ownerName)
-  }
   if (currentUser.value?.name) {
-    set.add(currentUser.value.name)
+    set.add(String(currentUser.value.name).trim())
+  }
+  if (currentList.value?.ownerName) {
+    set.add(String(currentList.value.ownerName).trim())
   }
   currentList.value?.items.forEach(i => {
-    if (i.recipientName && i.recipientName.trim()) {
+    if (typeof i.recipientName === 'string' && i.recipientName.trim()) {
       set.add(i.recipientName.trim())
     }
   })
-  return Array.from(set)
+  return Array.from(set).filter(Boolean)
 })
 
 const activeTab = ref<'link' | 'manual'>('link')
@@ -93,24 +100,24 @@ watch(() => props.isOpen, (open) => {
     if (props.editingItem) {
       activeTab.value = props.editingItem.url ? 'link' : 'manual'
       rawUrlInput.value = props.editingItem.url || ''
-      form.title = props.editingItem.title
-      form.recipientName = props.editingItem.recipientName || currentList.value?.ownerName || currentUser.value?.name || ''
-      form.description = props.editingItem.description || ''
-      form.url = props.editingItem.url || ''
-      form.imageUrl = props.editingItem.imageUrl || ''
+      form.title = ensureString(props.editingItem.title)
+      form.recipientName = ensureString(props.editingItem.recipientName) || ensureString(currentList.value?.ownerName) || ensureString(currentUser.value?.name) || ''
+      form.description = ensureString(props.editingItem.description)
+      form.url = ensureString(props.editingItem.url)
+      form.imageUrl = ensureString(props.editingItem.imageUrl)
       form.price = props.editingItem.price
-      form.currency = props.editingItem.currency || '€'
+      form.currency = ensureString(props.editingItem.currency) || '€'
       form.quantity = props.editingItem.quantity || 1
-      form.colorOrVariant = props.editingItem.colorOrVariant || ''
-      form.comment = props.editingItem.comment || ''
-      form.isFavorite = props.editingItem.isFavorite || false
+      form.colorOrVariant = ensureString(props.editingItem.colorOrVariant)
+      form.comment = ensureString(props.editingItem.comment)
+      form.isFavorite = Boolean(props.editingItem.isFavorite)
       form.priority = props.editingItem.priority || 'medium'
       showCustomRecipient.value = !existingRecipients.value.includes(form.recipientName)
     } else {
       activeTab.value = 'link'
       rawUrlInput.value = ''
       form.title = ''
-      form.recipientName = props.defaultRecipientName || currentUser.value?.name || currentList.value?.ownerName || ''
+      form.recipientName = ensureString(props.defaultRecipientName) || ensureString(currentUser.value?.name) || ensureString(currentList.value?.ownerName) || ''
       form.description = ''
       form.url = ''
       form.imageUrl = ''
@@ -128,19 +135,20 @@ watch(() => props.isOpen, (open) => {
 })
 
 function selectRecipient(name: string) {
-  form.recipientName = name
+  form.recipientName = ensureString(name)
   showCustomRecipient.value = false
 }
 
 function handleCustomRecipientSubmit() {
-  if (customRecipientInput.value.trim()) {
-    form.recipientName = customRecipientInput.value.trim()
+  const custom = ensureString(customRecipientInput.value).trim()
+  if (custom) {
+    form.recipientName = custom
     showCustomRecipient.value = false
   }
 }
 
 async function fetchLinkMetadata() {
-  const url = rawUrlInput.value.trim()
+  const url = ensureString(rawUrlInput.value).trim()
   if (!url) return
 
   isFetchingPreview.value = true
@@ -184,26 +192,33 @@ async function fetchLinkMetadata() {
 }
 
 async function handleSubmit() {
-  if (!form.title.trim()) return
+  const title = ensureString(form.title).trim()
+  if (!title) return
   isSubmitting.value = true
 
-  const recipient = (showCustomRecipient.value && customRecipientInput.value.trim())
-    ? customRecipientInput.value.trim()
-    : form.recipientName.trim() || currentList.value?.ownerName || currentUser.value?.name || 'Moi'
+  const customRec = ensureString(customRecipientInput.value).trim()
+  const formRec = ensureString(form.recipientName).trim()
+  const recipient = (showCustomRecipient.value && customRec)
+    ? customRec
+    : formRec || ensureString(currentUser.value?.name) || ensureString(currentList.value?.ownerName) || 'Moi'
 
-  const finalUrl = form.url.trim() || (activeTab.value === 'link' ? rawUrlInput.value.trim() : '') || undefined
+  const finalUrl = ensureString(form.url).trim() || (activeTab.value === 'link' ? ensureString(rawUrlInput.value).trim() : '') || undefined
+
+  const isCurrentLoggedIn = currentUser.value?.name && recipient.toLowerCase() === currentUser.value.name.toLowerCase()
 
   const payload: Partial<WishlistItem> = {
-    title: form.title.trim(),
+    title,
     recipientName: recipient,
-    description: form.description.trim() || undefined,
+    recipientId: isCurrentLoggedIn ? currentUser.value?.id : undefined,
+    recipientAvatar: isCurrentLoggedIn ? currentUser.value?.avatar : undefined,
+    description: ensureString(form.description).trim() || undefined,
     url: finalUrl,
-    imageUrl: form.imageUrl.trim() || undefined,
+    imageUrl: ensureString(form.imageUrl).trim() || undefined,
     price: (form.price !== undefined && form.price !== null && !isNaN(Number(form.price))) ? Number(form.price) : undefined,
-    currency: form.currency || '€',
+    currency: ensureString(form.currency) || '€',
     quantity: form.quantity > 0 ? form.quantity : 1,
-    colorOrVariant: form.colorOrVariant.trim() || undefined,
-    comment: form.comment.trim() || undefined,
+    colorOrVariant: ensureString(form.colorOrVariant).trim() || undefined,
+    comment: ensureString(form.comment).trim() || undefined,
     isFavorite: form.isFavorite,
     priority: form.priority
   }

@@ -67,7 +67,6 @@ provide('openScannerModal', openScanner)
 
     <!-- Global Modals -->
     <AuthModal />
-    <PwaInstallModal />
     <CreateListModal
       :is-open="isCreateModalOpen"
       @close="isCreateModalOpen = false"

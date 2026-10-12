@@ -204,13 +204,16 @@ export function useWishlists() {
     }
     if (!list) return null
 
+    const recipient = itemPayload.recipientName || currentUser.value?.name || list.ownerName || 'Moi'
+    const isCurrentUserRecipient = currentUser.value?.name && recipient.toLowerCase() === currentUser.value.name.toLowerCase()
+
     const newItem: WishlistItem = {
       id: itemPayload.id || `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       listId: list.id,
       title: itemPayload.title || 'Nouveau cadeau',
-      recipientName: itemPayload.recipientName || list.ownerName || 'Moi',
-      recipientId: itemPayload.recipientId,
-      recipientAvatar: itemPayload.recipientAvatar,
+      recipientName: recipient,
+      recipientId: itemPayload.recipientId || (isCurrentUserRecipient ? currentUser.value?.id : undefined),
+      recipientAvatar: itemPayload.recipientAvatar || (isCurrentUserRecipient ? currentUser.value?.avatar : undefined),
       description: itemPayload.description,
       url: itemPayload.url,
       imageUrl: itemPayload.imageUrl,

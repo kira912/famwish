@@ -5,10 +5,7 @@ const isInstalled = ref(false)
 const isOnline = ref(true)
 const isIos = ref(false)
 const isSafari = ref(false)
-const showInstallModal = ref(false)
 let deferredPrompt: any = null
-
-const STORAGE_KEY = 'famwish_pwa_install_dismissed'
 
 export function usePwa() {
   function initPwa() {
@@ -32,7 +29,6 @@ export function usePwa() {
     if (isStandalone) {
       isInstalled.value = true
       isInstallable.value = false
-      showInstallModal.value = false
       return
     }
 
@@ -41,35 +37,13 @@ export function usePwa() {
       e.preventDefault()
       deferredPrompt = e
       isInstallable.value = true
-      checkAndShowPrompt()
     })
 
     window.addEventListener('appinstalled', () => {
       isInstalled.value = true
       isInstallable.value = false
-      showInstallModal.value = false
       deferredPrompt = null
     })
-
-    // Proactively propose installation when the app is not already installed
-    setTimeout(() => {
-      checkAndShowPrompt()
-    }, 1000)
-  }
-
-  function checkAndShowPrompt(force = false) {
-    if (!import.meta.client) return
-    if (isInstalled.value) return
-
-    if (!force) {
-      const dismissed = sessionStorage.getItem(STORAGE_KEY)
-      if (dismissed) {
-        return
-      }
-    }
-
-    // Always propose when app is not installed
-    showInstallModal.value = true
   }
 
   async function promptInstall() {
@@ -79,23 +53,11 @@ export function usePwa() {
       if (outcome === 'accepted') {
         isInstalled.value = true
         isInstallable.value = false
-        showInstallModal.value = false
       }
       deferredPrompt = null
       return outcome === 'accepted'
     }
     return false
-  }
-
-  function dismissInstall() {
-    showInstallModal.value = false
-    if (import.meta.client) {
-      sessionStorage.setItem(STORAGE_KEY, 'true')
-    }
-  }
-
-  function openInstallModal() {
-    showInstallModal.value = true
   }
 
   return {
@@ -104,10 +66,7 @@ export function usePwa() {
     isIos,
     isSafari,
     isOnline,
-    showInstallModal,
     initPwa,
-    promptInstall,
-    dismissInstall,
-    openInstallModal
+    promptInstall
   }
 }

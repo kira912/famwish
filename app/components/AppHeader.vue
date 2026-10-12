@@ -23,7 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const { currentUser, openAuthModal } = useAuth()
-const { isInstallable, isInstalled, isIos, openInstallModal, isOnline } = usePwa()
+const { isInstallable, promptInstall, isOnline } = usePwa()
 const { isDark, toggleDark } = useTheme()
 </script>
 
@@ -57,10 +57,10 @@ const { isDark, toggleDark } = useTheme()
 
       <!-- Right: Action Buttons & Profile -->
       <div class="flex items-center gap-2 sm:gap-3">
-        <!-- PWA Install Prompt Button if not already installed -->
+        <!-- PWA Install Prompt Button if browser supports it -->
         <button
-          v-if="!isInstalled"
-          @click="openInstallModal"
+          v-if="isInstallable"
+          @click="promptInstall"
           class="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-bold transition-all border border-amber-300/40"
         >
           <Download class="w-3.5 h-3.5" />

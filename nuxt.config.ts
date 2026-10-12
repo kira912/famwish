@@ -113,7 +113,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      googleClientId: process.env.NUXT_PUBLIC_GOOGLE_CLIENT_ID || '1029384756-famwish.apps.googleusercontent.com'
+      googleClientId: process.env.NUXT_PUBLIC_GOOGLE_CLIENT_ID
     }
   }
 })
