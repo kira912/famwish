@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
@@ -9,7 +9,8 @@ import {
   ArrowRight,
   Loader2,
   User,
-  ShieldCheck
+  ShieldCheck,
+  Camera
 } from 'lucide-vue-next'
 import type { Wishlist } from '~/types'
 
@@ -17,6 +18,7 @@ const route = useRoute()
 const router = useRouter()
 const { joinListByCode } = useWishlists()
 const { currentUser, createCustomUser, triggerGoogleLogin, isGoogleLoading } = useAuth()
+const openScannerModal = inject<() => void>('openScannerModal', () => {})
 
 const code = ref((route.query.code as string) || '')
 const inviteList = ref<Wishlist | null>(null)
@@ -292,6 +294,22 @@ async function handleCodeSearchSubmit() {
             <span>Rechercher la liste</span>
           </button>
         </form>
+
+        <div class="relative flex items-center justify-center my-4">
+          <div class="border-t border-slate-200 dark:border-slate-800 w-full" />
+          <span class="bg-white dark:bg-slate-900 px-3 text-[11px] text-slate-400 uppercase tracking-wider font-semibold absolute">
+            OU
+          </span>
+        </div>
+
+        <button
+          type="button"
+          @click="openScannerModal"
+          class="w-full py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors active:scale-98"
+        >
+          <Camera class="w-4 h-4 text-rose-500" />
+          <span>Scanner le QR code avec la caméra</span>
+        </button>
       </div>
     </div>
   </div>
