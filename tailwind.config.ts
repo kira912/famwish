@@ -13,12 +13,12 @@ export default <Partial<Config>>{
     extend: {
       colors: {
         brand: {
-          50: '#fff1f2',
-          100: '#ffe4e6',
-          200: '#fecdd3',
-          300: '#fda4af',
-          400: '#fb7185',
-          500: '#f43f5e', // Rose festif
+          50: '#fff1f3',
+          100: '#ffe4e8',
+          200: '#fecdd6',
+          300: '#fda4b4',
+          400: '#fb718d',
+          500: '#f43f5e',
           600: '#e11d48',
           700: '#be123c',
           800: '#9f1239',
@@ -26,17 +26,17 @@ export default <Partial<Config>>{
           950: '#4c051e',
         },
         xmas: {
-          50: '#fef2f2',
-          100: '#fee2e2',
-          200: '#fecaca',
-          300: '#fca5a5',
-          400: '#f87171',
-          500: '#ef4444',
-          600: '#dc2626',
-          700: '#b91c1c', // Rouge Noël profond
-          800: '#991b1b', // Rouge velours
-          900: '#7f1d1d', // Rouge rubis royal
-          950: '#450a0a',
+          50: '#fdf2f2',
+          100: '#fde2e2',
+          200: '#fbcaca',
+          300: '#f8a5a5',
+          400: '#f27171',
+          500: '#dc2626',
+          600: '#b91c1c',
+          700: '#991b1b',
+          800: '#7f1d1d',
+          900: '#631717',
+          950: '#3a0c0c',
         },
         gold: {
           50: '#fefce8',
@@ -44,9 +44,9 @@ export default <Partial<Config>>{
           200: '#fef08a',
           300: '#fde047',
           400: '#facc15',
-          500: '#eab308', // Doré vibrant
-          600: '#ca8a04', // Or chaud
-          700: '#a16207', // Or antique
+          500: '#eab308',
+          600: '#ca8a04',
+          700: '#a16207',
           800: '#854d0e',
           900: '#713f12',
           950: '#422006',
@@ -66,32 +66,34 @@ export default <Partial<Config>>{
         }
       },
       fontFamily: {
-        sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
         display: ['Outfit', 'Plus Jakarta Sans', 'sans-serif']
       },
       boxShadow: {
-        'glow': '0 0 25px -5px rgba(244, 63, 94, 0.3)',
-        'glow-gold': '0 0 25px -5px rgba(215, 176, 50, 0.3)',
-        'soft': '0 10px 30px -10px rgba(0, 0, 0, 0.08)',
-        'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)'
+        'subtle': '0 1px 2px 0 rgba(0, 0, 0, 0.04)',
+        'card': '0 2px 8px -2px rgba(15, 23, 42, 0.06), 0 1px 3px -1px rgba(15, 23, 42, 0.04)',
+        'card-hover': '0 12px 28px -6px rgba(15, 23, 42, 0.1), 0 4px 12px -2px rgba(15, 23, 42, 0.05)',
+        'elevated': '0 20px 40px -12px rgba(15, 23, 42, 0.15)',
+        'glow': '0 8px 24px -4px rgba(225, 29, 72, 0.25)',
+        'glow-gold': '0 8px 24px -4px rgba(202, 138, 4, 0.25)',
       },
       animation: {
-        'float': 'float 4s ease-in-out infinite',
-        'pulse-subtle': 'pulseSubtle 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'shimmer': 'shimmer 2s linear infinite',
+        'float': 'float 5s ease-in-out infinite',
+        'fade-in': 'fadeIn 0.2s ease-out forwards',
+        'scale-up': 'scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
       },
       keyframes: {
         float: {
           '0%, 100%': { transform: 'translateY(0)' },
-          '50%': { transform: 'translateY(-6px)' },
+          '50%': { transform: 'translateY(-4px)' },
         },
-        pulseSubtle: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.75' },
+        fadeIn: {
+          'from': { opacity: '0' },
+          'to': { opacity: '1' },
         },
-        shimmer: {
-          'from': { backgroundPosition: '200% 0' },
-          'to': { backgroundPosition: '-200% 0' },
+        scaleUp: {
+          'from': { opacity: '0', transform: 'scale(0.96) translateY(8px)' },
+          'to': { opacity: '1', transform: 'scale(1) translateY(0)' },
         }
       }
     }

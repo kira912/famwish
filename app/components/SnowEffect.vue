@@ -6,7 +6,7 @@ const props = withDefaults(
     count?: number
   }>(),
   {
-    count: 24
+    count: 20
   }
 )
 
@@ -24,11 +24,11 @@ const flakes = computed<Flake[]>(() => {
   for (let i = 0; i < props.count; i++) {
     list.push({
       id: i,
-      left: Math.round(Math.random() * 100),
-      size: Math.round(Math.random() * 4 + 3), // 3px to 7px
-      duration: Math.round(Math.random() * 6 + 6), // 6s to 12s
-      delay: Math.round(Math.random() * 8 * 10) / 10, // 0s to 8s
-      opacity: Math.round((Math.random() * 0.5 + 0.35) * 100) / 100 // 0.35 to 0.85
+      left: Math.round((i * (100 / props.count) + (Math.random() * 4 - 2))),
+      size: Math.round(Math.random() * 3 + 3),
+      duration: Math.round((Math.random() * 5 + 7) * 10) / 10,
+      delay: Math.round((Math.random() * 6) * 10) / 10,
+      opacity: Math.round((Math.random() * 0.35 + 0.35) * 100) / 100
     })
   }
   return list
@@ -40,7 +40,7 @@ const flakes = computed<Flake[]>(() => {
     <div
       v-for="flake in flakes"
       :key="flake.id"
-      class="snow-flake shadow-sm"
+      class="snow-flake"
       :style="{
         left: `${flake.left}%`,
         width: `${flake.size}px`,

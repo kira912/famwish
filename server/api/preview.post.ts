@@ -20,6 +20,7 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
   try {
     const parsedUrl = new URL(formattedUrl)
     const siteName = parsedUrl.hostname.replace(/^www\./, '')
+    const isAmazon = /(?:amazon\.|amzn\.to|amzn\.eu|zvg\.me)/i.test(parsedUrl.hostname)
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 6000)
@@ -50,11 +51,13 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
       const rawText = await response.text()
       // Limit HTML length to avoid catastrophic regex backtracking on giant pages
       html = rawText.slice(0, 500000)
+    } catch {
+      // Fetch may fail or timeout on anti-bot protected pages
     } finally {
       clearTimeout(timeout)
     }
 
-    // 1. Helper for meta tags
+    // Helper for meta tags
     const getMeta = (prop: string): string | undefined => {
       const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']*)["']`, 'i'))
         || html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${prop}["']`, 'i'))
@@ -67,7 +70,10 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
     let price: number | undefined
     let currency: string = '€'
 
-    // 2. Try JSON-LD schema (schema.org/Product) used by Shopify, Fnac, Lego, Decathlon, etc.
+    // Extract Amazon ASIN if applicable
+    const amazonAsin = isAmazon ? extractAmazonAsin(finalUrl) || extractAmazonAsin(formattedUrl) : null
+
+    // 1. Try JSON-LD schema (schema.org/Product) used by Shopify, Fnac, Lego, Decathlon, etc.
     const jsonLdMatches = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || []
     for (const match of jsonLdMatches) {
       try {
@@ -107,36 +113,91 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
       }
     }
 
-    // 3. Amazon & E-Commerce specific HTML parsing
-    if (!title) {
-      // Amazon title
-      const amazonTitleMatch = html.match(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)
-        || html.match(/<h1[^>]+id=["']title["'][^>]*>([\s\S]*?)<\/h1>/i)
-      if (amazonTitleMatch) {
-        title = decodeHtmlEntities(amazonTitleMatch[1]).trim()
+    // 2. Amazon & E-Commerce specific HTML parsing
+    if (isAmazon || !imageUrl || !title) {
+      // Amazon Title from HTML
+      if (!title) {
+        const amazonTitleMatch = html.match(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)
+          || html.match(/<h1[^>]+id=["']title["'][^>]*>([\s\S]*?)<\/h1>/i)
+          || html.match(/<span[^>]+id=["']title["'][^>]*>([\s\S]*?)<\/span>/i)
+        if (amazonTitleMatch) {
+          title = decodeHtmlEntities(amazonTitleMatch[1]).trim()
+        }
       }
-    }
 
-    if (!imageUrl) {
-      // Amazon image dynamic or hires
-      const dynamicImgMatch = html.match(/data-a-dynamic-image=["'](\{.*?\})["']/i)
-      if (dynamicImgMatch) {
-        try {
-          const parsedDynamic = JSON.parse(decodeHtmlEntities(dynamicImgMatch[1]))
-          const keys = Object.keys(parsedDynamic)
-          if (keys.length > 0) imageUrl = keys[0]
-        } catch {}
+      // Amazon Image Extraction:
+      // a) colorImages JS object (initial gallery)
+      if (!imageUrl) {
+        const colorImagesMatch = html.match(/["']colorImages["']\s*:\s*\{\s*["']initial["']\s*:\s*(\[[\s\S]*?\])\s*\}/i)
+        if (colorImagesMatch) {
+          try {
+            const initial = JSON.parse(colorImagesMatch[1])
+            if (Array.isArray(initial) && initial[0]) {
+              const first = initial[0]
+              if (first.hiRes && typeof first.hiRes === 'string') imageUrl = first.hiRes
+              else if (first.large && typeof first.large === 'string') imageUrl = first.large
+              else if (first.main && typeof first.main === 'object') {
+                const keys = Object.keys(first.main)
+                if (keys.length > 0) imageUrl = keys[0]
+              }
+            }
+          } catch {}
+        }
       }
+
+      // b) data-a-dynamic-image attributes
+      if (!imageUrl) {
+        const dynamicImgMatches = [...html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi)]
+        for (const m of dynamicImgMatches) {
+          try {
+            const decoded = decodeHtmlEntities(m[1])
+            const parsed = JSON.parse(decoded)
+            const sorted = Object.entries(parsed).sort((a, b) => {
+              const sizeA = Array.isArray(a[1]) ? (Number(a[1][0]) || 0) * (Number(a[1][1]) || 0) : 0
+              const sizeB = Array.isArray(b[1]) ? (Number(b[1][0]) || 0) * (Number(b[1][1]) || 0) : 0
+              return sizeB - sizeA
+            })
+            if (sorted.length > 0 && sorted[0][0]) {
+              imageUrl = sorted[0][0]
+              break
+            }
+          } catch {}
+        }
+      }
+
+      // c) data-old-hires attribute
       if (!imageUrl) {
         const oldHiresMatch = html.match(/data-old-hires=["']([^"']+)["']/i)
-        if (oldHiresMatch && oldHiresMatch[1]) imageUrl = oldHiresMatch[1]
+        if (oldHiresMatch && oldHiresMatch[1] && oldHiresMatch[1].startsWith('http')) {
+          imageUrl = decodeHtmlEntities(oldHiresMatch[1])
+        }
       }
+
+      // d) Landing / Main image element
       if (!imageUrl) {
-        const landingImgMatch = html.match(/<img[^>]+id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)
-        if (landingImgMatch && landingImgMatch[1]) imageUrl = landingImgMatch[1]
+        const landingImgMatch = html.match(/<img[^>]+id=["'](?:landingImage|imgBlkFront|main-image|ebooks-img-canvas|litb-canvas-img)["'][^>]+src=["']([^"']+)["']/i)
+          || html.match(/<img[^>]+src=["']([^"']+)["'][^>]+id=["'](?:landingImage|imgBlkFront|main-image|ebooks-img-canvas|litb-canvas-img)["']/i)
+        if (landingImgMatch && landingImgMatch[1] && landingImgMatch[1].startsWith('http')) {
+          imageUrl = decodeHtmlEntities(landingImgMatch[1])
+        }
+      }
+
+      // e) media-amazon product image scanning
+      if (!imageUrl && isAmazon) {
+        const allMediaMatches = [...html.matchAll(/https?:\/\/[a-z0-9.-]*(?:media-amazon|ssl-images-amazon)\.com\/images\/I\/[a-zA-Z0-9%_-]+\.(?:jpg|png|webp)/gi)].map(m => m[0])
+        const filtered = allMediaMatches.filter(u => !/transparent|pixel|sprite|play-icon|loading|badge|logo|icon|nav|nav2/i.test(u))
+        if (filtered.length > 0) {
+          imageUrl = filtered[0]
+        }
+      }
+
+      // f) Amazon ASIN CDN Fallback
+      if (!imageUrl && amazonAsin) {
+        imageUrl = `https://images-na.ssl-images-amazon.com/images/P/${amazonAsin}.01._SCLZZZZZZZ_SX500_.jpg`
       }
     }
 
+    // 3. Price extraction
     if (!price) {
       // Amazon price elements
       const offscreenPriceMatch = html.match(/<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)<\/span>/i)
@@ -163,12 +224,24 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
       }
     }
 
+    // Fallback: title from URL slug if still not found
+    if (!title || title.toLowerCase().includes('robot check') || title.toLowerCase().includes('captcha')) {
+      const slugTitle = extractSlugTitle(finalUrl) || extractSlugTitle(formattedUrl)
+      if (slugTitle) {
+        title = slugTitle
+      }
+    }
+
     if (!description) {
       description = getMeta('og:description') || getMeta('twitter:description') || getMeta('description')
     }
 
     if (!imageUrl) {
       imageUrl = getMeta('og:image') || getMeta('twitter:image') || getMeta('image')
+    }
+
+    if (!imageUrl && isAmazon && amazonAsin) {
+      imageUrl = `https://images-na.ssl-images-amazon.com/images/P/${amazonAsin}.01._SCLZZZZZZZ_SX500_.jpg`
     }
 
     if (!price) {
@@ -187,6 +260,8 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
         .split(' | ')[0]
         .split(' - Amazon.fr')[0]
         .split(' : Amazon.fr')[0]
+        .split(' - Amazon.com')[0]
+        .split(' : Amazon.com')[0]
         .split(' - Fnac')[0]
         .split(' | Fnac')[0]
         .split(' | LEGO')[0]
@@ -196,12 +271,17 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
         .trim()
     }
 
-    // 6. Ensure absolute image URL
-    if (imageUrl && !imageUrl.startsWith('http')) {
-      try {
-        imageUrl = new URL(imageUrl, finalUrl).toString()
-      } catch {
-        // Keep as is
+    // 6. Ensure absolute image URL and handle protocols
+    if (imageUrl) {
+      imageUrl = decodeHtmlEntities(imageUrl).trim()
+      if (imageUrl.startsWith('//')) {
+        imageUrl = 'https:' + imageUrl
+      } else if (!imageUrl.startsWith('http')) {
+        try {
+          imageUrl = new URL(imageUrl, finalUrl).toString()
+        } catch {
+          // Keep as is
+        }
       }
     }
 
@@ -234,8 +314,10 @@ export default defineEventHandler(async (event): Promise<LinkMetadata> => {
   } catch (err) {
     try {
       const host = new URL(formattedUrl).hostname.replace(/^www\./, '')
+      const asin = extractAmazonAsin(formattedUrl)
       return {
-        title: `Article sur ${host}`,
+        title: extractSlugTitle(formattedUrl) || `Article sur ${host}`,
+        imageUrl: asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SCLZZZZZZZ_SX500_.jpg` : undefined,
         siteName: host,
         url: formattedUrl,
         currency: '€'
@@ -257,8 +339,41 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+}
+
+function extractAmazonAsin(url: string): string | null {
+  if (!url) return null
+  const patterns = [
+    /\/(?:dp|gp\/product|gp\/aw\/d|o\/ASIN|exec\/obidos\/ASIN|asin|product)\/([A-Z0-9]{10})(?:[/?&#]|$)/i,
+    /\/([B0-9][A-Z0-9]{9})(?:[/?&#]|$)/i,
+    /[?&]asin=([A-Z0-9]{10})(?:&|$)/i
+  ]
+  for (const pattern of patterns) {
+    const match = url.match(pattern)
+    if (match && match[1]) {
+      return match[1].toUpperCase()
+    }
+  }
+  return null
+}
+
+function extractSlugTitle(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    const pathname = parsed.pathname
+    const slugMatch = pathname.match(/^\/([^/]+)\/(?:dp|gp\/product|asin)/i)
+    if (slugMatch && slugMatch[1] && !['dp', 'gp', 'o', 'exec'].includes(slugMatch[1].toLowerCase())) {
+      const rawSlug = decodeURIComponent(slugMatch[1].replace(/\+/g, ' '))
+      const cleaned = rawSlug.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (cleaned.length > 2) {
+        return cleaned
+      }
+    }
+  } catch {}
+  return undefined
 }

@@ -3,17 +3,13 @@ import { ref, watch, computed } from 'vue'
 import QRCode from 'qrcode'
 import {
   X,
-  Users,
   Copy,
   Check,
   Share2,
   Download,
   MessageCircle,
-  Sparkles,
   QrCode,
-  ShieldCheck,
-  Gift,
-  UserCheck
+  Sparkles
 } from 'lucide-vue-next'
 import { useToast } from '~/composables/useToast'
 import type { Wishlist } from '~/types'
@@ -43,7 +39,7 @@ const shareUrl = computed(() => {
 
 const shareText = computed(() => {
   if (!props.list) return ''
-  return `🎄 Rejoins notre liste de souhaits "${props.list.title}" sur FamWish !\nAjoute tes idées cadeaux et réserve ceux des autres en secret :\n👉 ${shareUrl.value}`
+  return `🎁 Rejoins notre liste de souhaits "${props.list.title}" sur FamWish !\nAjoute tes idées cadeaux et réserve ceux des autres en secret :\n👉 ${shareUrl.value}`
 })
 
 watch(() => props.isOpen, async (open) => {
@@ -65,7 +61,7 @@ async function generateQr() {
       width: 280,
       margin: 2,
       color: {
-        dark: '#4f46e5',
+        dark: '#0f172a',
         light: '#ffffff'
       }
     })
@@ -122,139 +118,153 @@ function downloadQr() {
 </script>
 
 <template>
-  <div
-    v-if="isOpen && list"
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
-    @click.self="emit('close')"
-  >
+  <Transition name="modal">
     <div
-      class="relative w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-2xl overflow-hidden animate-scale-up max-h-[92vh] flex flex-col"
+      v-if="isOpen && list"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-modal-title"
     >
-      <!-- Festive Header Banner -->
-      <div class="relative bg-gradient-to-r from-indigo-600 via-purple-600 to-rose-500 p-6 text-white text-center shrink-0">
-        <button
-          @click="emit('close')"
-          class="absolute top-4 right-4 p-2 rounded-full bg-black/20 hover:bg-black/30 text-white transition-all"
-        >
-          <X class="w-5 h-5" />
-        </button>
+      <div
+        class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+        @click="emit('close')"
+      />
 
-        <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl mx-auto mb-3 shadow-inner">
-          💌
-        </div>
-
-        <h3 class="text-xl font-black font-display tracking-tight">
-          Inviter des proches à rejoindre la liste
-        </h3>
-        <p class="text-xs text-white/90 mt-1 max-w-sm mx-auto font-medium">
-          Partagez cette invitation pour réunir toute la famille sur "{{ list.title }}"
-        </p>
-      </div>
-
-      <!-- Content -->
-      <div class="p-6 space-y-5 overflow-y-auto">
-        <!-- 1-Click WhatsApp Direct Share Button -->
-        <button
-          type="button"
-          @click="shareViaWhatsApp"
-          class="w-full py-3.5 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white font-bold text-sm shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2.5 transition-all"
-        >
-          <MessageCircle class="w-5 h-5 fill-current" />
-          <span>Envoyer sur le groupe WhatsApp de la famille</span>
-        </button>
-
-        <!-- Share Link Bar with Copy -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Lien d'invitation direct
-          </label>
-          <div class="flex items-center gap-2">
-            <div class="flex-1 px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 font-mono truncate select-all">
-              {{ shareUrl }}
+      <div
+        class="relative w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-elevated overflow-hidden z-10 my-auto max-h-[92vh] flex flex-col"
+      >
+        <!-- Header -->
+        <div class="flex items-center justify-between p-6 pb-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center text-xl">
+              💌
             </div>
-            <button
-              type="button"
-              @click="copyLink"
-              class="px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all shrink-0"
-              :class="isCopied
-                ? 'bg-emerald-600 text-white'
-                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'"
-            >
-              <Check v-if="isCopied" class="w-4 h-4" />
-              <Copy v-else class="w-4 h-4" />
-              <span>{{ isCopied ? 'Copié !' : 'Copier' }}</span>
-            </button>
+            <div>
+              <h3 id="invite-modal-title" class="text-lg font-bold font-display text-slate-900 dark:text-white">
+                Inviter des proches
+              </h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400 truncate max-w-xs">
+                Partagez l'accès à "{{ list.title }}"
+              </p>
+            </div>
           </div>
-        </div>
-
-        <!-- Additional Action Buttons (Native Share & Toggle QR Code) -->
-        <div class="grid grid-cols-2 gap-2.5">
-          <button
-            type="button"
-            @click="handleNativeShare"
-            class="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-all"
-          >
-            <Share2 class="w-4 h-4 text-indigo-500" />
-            <span>Partager (SMS/Email...)</span>
-          </button>
 
           <button
+            @click="emit('close')"
             type="button"
-            @click="showQrDetails = !showQrDetails"
-            class="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-all"
+            aria-label="Fermer la boîte de dialogue"
+            class="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
-            <QrCode class="w-4 h-4 text-rose-500" />
-            <span>{{ showQrDetails ? 'Masquer le QR' : 'Afficher le QR Code' }}</span>
+            <X class="w-5 h-5" />
           </button>
         </div>
 
-        <!-- QR Code Section -->
-        <div v-if="showQrDetails" class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center space-y-3 animate-fade-in">
-          <div class="inline-block p-3 rounded-2xl bg-white shadow-sm border border-slate-100">
-            <img
-              v-if="qrDataUrl"
-              :src="qrDataUrl"
-              alt="QR Code FamWish"
-              class="w-48 h-48 mx-auto"
-            />
+        <!-- Content -->
+        <div class="p-6 space-y-4 overflow-y-auto">
+          <!-- WhatsApp 1-Click button -->
+          <button
+            type="button"
+            @click="shareViaWhatsApp"
+            class="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-semibold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2.5 transition-colors"
+          >
+            <MessageCircle class="w-4 h-4 fill-white" />
+            <span>Envoyer sur WhatsApp</span>
+          </button>
+
+          <!-- Direct Link with Copy -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Lien d'invitation direct
+            </label>
+            <div class="flex items-center gap-2">
+              <div class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 font-mono truncate select-all">
+                {{ shareUrl }}
+              </div>
+              <button
+                type="button"
+                @click="copyLink"
+                class="px-4 py-2.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                :class="isCopied
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm'"
+              >
+                <Check v-if="isCopied" class="w-3.5 h-3.5" />
+                <Copy v-else class="w-3.5 h-3.5" />
+                <span>{{ isCopied ? 'Copié !' : 'Copier' }}</span>
+              </button>
+            </div>
           </div>
-          <div>
-            <p class="text-xs text-slate-500 dark:text-slate-400">
-              Scannable directement avec l'appareil photo d'un smartphone
-            </p>
+
+          <!-- Secondary Actions -->
+          <div class="grid grid-cols-2 gap-2">
             <button
               type="button"
-              @click="downloadQr"
-              class="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-700 transition-all"
+              @click="handleNativeShare"
+              class="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
             >
-              <Download class="w-3.5 h-3.5" />
-              <span>Télécharger l'image QR</span>
+              <Share2 class="w-3.5 h-3.5 text-slate-500" />
+              <span>Autre partage (SMS...)</span>
+            </button>
+
+            <button
+              type="button"
+              @click="showQrDetails = !showQrDetails"
+              class="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
+            >
+              <QrCode class="w-3.5 h-3.5 text-rose-500" />
+              <span>{{ showQrDetails ? 'Masquer le QR' : 'Afficher le QR code' }}</span>
             </button>
           </div>
-        </div>
 
-        <!-- How it works banner for invited members -->
-        <div class="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
-          <div class="flex items-center gap-2 text-indigo-950 dark:text-indigo-200 text-xs font-bold">
-            <Sparkles class="w-4 h-4 text-indigo-500" />
-            <span>Comment votre proche rejoint la liste ?</span>
+          <!-- QR Code Section -->
+          <div v-if="showQrDetails" class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center space-y-3 animate-fade-in">
+            <div class="inline-block p-3 rounded-xl bg-white shadow-sm border border-slate-100">
+              <img
+                v-if="qrDataUrl"
+                :src="qrDataUrl"
+                alt="QR Code d'invitation"
+                class="w-44 h-44 mx-auto rounded-lg object-contain"
+              />
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 dark:text-slate-400">
+                Scannable directement avec l'appareil photo d'un smartphone
+              </p>
+              <button
+                type="button"
+                @click="downloadQr"
+                class="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Download class="w-3.5 h-3.5" />
+                <span>Télécharger le QR Code</span>
+              </button>
+            </div>
           </div>
-          <ul class="text-[11px] text-slate-600 dark:text-slate-300 space-y-1.5 pl-1">
-            <li class="flex items-start gap-1.5">
-              <span class="text-indigo-500 font-bold">1.</span>
-              <span>Il clique sur votre lien ou scanne le QR code.</span>
-            </li>
-            <li class="flex items-start gap-1.5">
-              <span class="text-indigo-500 font-bold">2.</span>
-              <span>Il rejoint en 1 clic <strong>avec Google</strong> ou en <strong>tapant simplement son prénom</strong>.</span>
-            </li>
-            <li class="flex items-start gap-1.5">
-              <span class="text-indigo-500 font-bold">3.</span>
-              <span>Il peut aussitôt consulter les idées, ajouter ses souhaits et réserver des cadeaux secrètement !</span>
-            </li>
-          </ul>
+
+          <!-- How it works guide -->
+          <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center gap-1.5 text-slate-900 dark:text-white text-xs font-bold">
+              <Sparkles class="w-3.5 h-3.5 text-amber-500" />
+              <span>Comment vos proches rejoignent la liste ?</span>
+            </div>
+            <ul class="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 pl-1">
+              <li class="flex items-start gap-1.5">
+                <span class="text-rose-500 font-bold">1.</span>
+                <span>Ils cliquent sur votre lien ou scannent le QR code.</span>
+              </li>
+              <li class="flex items-start gap-1.5">
+                <span class="text-rose-500 font-bold">2.</span>
+                <span>Ils se connectent avec Google ou tapent simplement leur prénom.</span>
+              </li>
+              <li class="flex items-start gap-1.5">
+                <span class="text-rose-500 font-bold">3.</span>
+                <span>Ils peuvent consulter les souhaits, ajouter leurs idées et réserver des cadeaux en secret !</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </Transition>
 </template>
