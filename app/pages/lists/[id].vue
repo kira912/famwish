@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, inject, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -14,7 +14,10 @@ import {
   Trash2,
   Copy,
   Check,
-  Gift
+  Gift,
+  Baby,
+  UserCheck,
+  X
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
@@ -23,7 +26,15 @@ import type { Wishlist, WishlistItem } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
-const { getList, fetchListById, deleteList, deleteItem, syncMemberOnServer } = useWishlists()
+const {
+  getList,
+  fetchListById,
+  deleteList,
+  deleteItem,
+  syncMemberOnServer,
+  addChildMember,
+  removeChildMember
+} = useWishlists()
 const { currentUser, joinListId } = useAuth()
 const toast = useToast()
 
@@ -52,6 +63,7 @@ const isAddItemOpen = ref(false)
 const itemToEdit = ref<WishlistItem | null>(null)
 const isEditListOpen = ref(false)
 const isInviteModalOpen = ref(false)
+const isChildModalOpen = ref(false)
 const isCodeCopied = ref(false)
 
 // Item filters
@@ -59,39 +71,80 @@ const filterStatus = ref<'all' | 'favorites' | 'available' | 'purchased'>('all')
 const selectedRecipient = ref<string>('all')
 const itemSearch = ref('')
 
-const recipientsList = computed(() => {
-  if (!list.value) return []
-  const map = new Map<string, { key: string; name: string; avatar?: string; role?: string; count: number; availableCount: number }>()
+export interface RecipientEntry {
+  key: string
+  id?: string
+  name: string
+  avatar?: string
+  role?: 'owner' | 'member' | 'child'
+  isChild?: boolean
+  parentId?: string
+  parentName?: string
+  age?: number
+  count: number
+  availableCount: number
+}
 
-  const addOrGetRecipient = (rawName: unknown, avatar?: string, role?: string) => {
+const recipientsList = computed<RecipientEntry[]>(() => {
+  if (!list.value) return []
+  const map = new Map<string, RecipientEntry>()
+
+  const addOrGetRecipient = (
+    rawName: unknown,
+    avatar?: string,
+    role?: 'owner' | 'member' | 'child',
+    meta?: { id?: string; isChild?: boolean; parentId?: string; parentName?: string; age?: number }
+  ) => {
     if (typeof rawName !== 'string') return null
     const cleanName = rawName.trim()
-    if (!cleanName || cleanName.startsWith('user-') || cleanName.startsWith('google-')) return null
+    if (!cleanName || cleanName.startsWith('user-') || cleanName.startsWith('google-') || cleanName.startsWith('child-')) return null
     const key = cleanName.toLowerCase()
+    const isChild = Boolean(meta?.isChild || role === 'child')
     if (!map.has(key)) {
       map.set(key, {
         key,
+        id: meta?.id,
         name: cleanName,
         avatar: avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
-        role,
+        role: isChild ? 'child' : role,
+        isChild,
+        parentId: meta?.parentId,
+        parentName: meta?.parentName,
+        age: meta?.age,
         count: 0,
         availableCount: 0
       })
     } else {
       const existing = map.get(key)!
       if (avatar && !existing.avatar) existing.avatar = avatar
+      if (meta?.id && !existing.id) existing.id = meta.id
       if (role === 'owner') existing.role = 'owner'
+      if (isChild) {
+        existing.role = 'child'
+        existing.isChild = true
+        if (meta?.parentId) existing.parentId = meta.parentId
+        if (meta?.parentName) existing.parentName = meta.parentName
+        if (meta?.age !== undefined) existing.age = meta.age
+        if (avatar) existing.avatar = avatar
+      }
     }
     return map.get(key)!
   }
 
   const owner = list.value.ownerName || 'Moi'
-  addOrGetRecipient(owner, list.value.ownerAvatar, 'owner')
+  addOrGetRecipient(owner, list.value.ownerAvatar, 'owner', { id: list.value.ownerId })
 
   if (Array.isArray(list.value.members)) {
     list.value.members.forEach((m: any) => {
       if (typeof m === 'object' && m !== null && m.name) {
-        addOrGetRecipient(m.name, m.avatar, m.role || 'member')
+        const isChild = Boolean(m.isChild || m.role === 'child')
+        addOrGetRecipient(m.name, m.avatar, isChild ? 'child' : (m.role || 'member'), {
+          id: m.id,
+          isChild,
+          parentId: m.parentId,
+          parentName: m.parentName,
+          age: m.age !== undefined && m.age !== null && !isNaN(Number(m.age)) ? Number(m.age) : undefined
+        })
       } else if (typeof m === 'string') {
         addOrGetRecipient(m, undefined, 'member')
       }
@@ -112,6 +165,167 @@ const recipientsList = computed(() => {
 
   return Array.from(map.values())
 })
+
+// Adult members who can be selected as a parent for a child
+const adultMembers = computed(() => {
+  const adults = recipientsList.value.filter(r => !r.isChild && r.role !== 'child')
+  if (currentUser.value?.name) {
+    const exists = adults.some(a => a.name.toLowerCase() === currentUser.value!.name.trim().toLowerCase())
+    if (!exists) {
+      adults.unshift({
+        key: currentUser.value.name.trim().toLowerCase(),
+        id: currentUser.value.id,
+        name: currentUser.value.name.trim(),
+        avatar: currentUser.value.avatar,
+        role: isOwner.value ? 'owner' : 'member',
+        count: 0,
+        availableCount: 0
+      })
+    }
+  }
+  return adults
+})
+
+const childrenMembers = computed(() => {
+  return recipientsList.value.filter(r => r.isChild || r.role === 'child')
+})
+
+const selectedMemberObj = computed<RecipientEntry | null>(() => {
+  if (selectedRecipient.value === 'all') return null
+  return recipientsList.value.find(
+    r => r.name.toLowerCase() === selectedRecipient.value.toLowerCase()
+  ) || null
+})
+
+function getChildInfo(recipientName?: string) {
+  if (!recipientName) return null
+  const found = recipientsList.value.find(
+    r => (r.isChild || r.role === 'child') && r.name.toLowerCase() === recipientName.trim().toLowerCase()
+  )
+  if (!found) return null
+  return {
+    name: found.name,
+    parentName: found.parentName || list.value?.ownerName,
+    age: found.age
+  }
+}
+
+function canManageChild(child: RecipientEntry): boolean {
+  if (isOwner.value) return true
+  if (!currentUser.value) return false
+  if (child.parentId && child.parentId === currentUser.value.id) return true
+  if (
+    child.parentName &&
+    currentUser.value.name &&
+    child.parentName.trim().toLowerCase() === currentUser.value.name.trim().toLowerCase()
+  ) {
+    return true
+  }
+  return false
+}
+
+function canManageItem(item: WishlistItem): boolean {
+  if (isOwner.value) return true
+  if (!currentUser.value) return false
+  const recName = (item.recipientName || list.value?.ownerName || '').trim().toLowerCase()
+  if (recName && currentUser.value.name && recName === currentUser.value.name.trim().toLowerCase()) {
+    return true
+  }
+  const child = recipientsList.value.find(
+    r => (r.isChild || r.role === 'child') && r.name.toLowerCase() === recName
+  )
+  if (child && canManageChild(child)) {
+    return true
+  }
+  return false
+}
+
+// Child Modal State & Logic
+const editingChildId = ref<string | undefined>(undefined)
+const showCustomParentInput = ref(false)
+const isSavingChild = ref(false)
+const childAvatarSeeds = ['Leo', 'Lily', 'Felix', 'Mia', 'Lucas', 'Chloe', 'Noa', 'Emma']
+
+const childForm = reactive({
+  name: '',
+  age: undefined as number | undefined,
+  parentName: '',
+  parentId: undefined as string | undefined,
+  avatarSeed: 'Leo'
+})
+
+const computedChildAvatar = computed(() => {
+  const seed = childForm.avatarSeed || childForm.name.trim() || 'Enfant'
+  return `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(seed)}`
+})
+
+function openChildModal(childToEdit?: RecipientEntry) {
+  if (childToEdit && (childToEdit.isChild || childToEdit.role === 'child')) {
+    editingChildId.value = childToEdit.id
+    childForm.name = childToEdit.name
+    childForm.age = childToEdit.age
+    childForm.parentName = childToEdit.parentName || currentUser.value?.name || list.value?.ownerName || ''
+    childForm.parentId = childToEdit.parentId
+    childForm.avatarSeed = childToEdit.name
+    showCustomParentInput.value = !adultMembers.value.some(
+      a => a.name.toLowerCase() === childForm.parentName.toLowerCase()
+    )
+  } else {
+    editingChildId.value = undefined
+    childForm.name = ''
+    childForm.age = undefined
+    const defaultParent = currentUser.value?.name || list.value?.ownerName || adultMembers.value[0]?.name || ''
+    childForm.parentName = defaultParent
+    childForm.parentId = currentUser.value?.id || list.value?.ownerId
+    childForm.avatarSeed = childAvatarSeeds[Math.floor(Math.random() * childAvatarSeeds.length)] || 'Leo'
+    showCustomParentInput.value = false
+  }
+  isChildModalOpen.value = true
+}
+
+function selectParentForChild(adult: RecipientEntry) {
+  childForm.parentName = adult.name
+  childForm.parentId = adult.id
+  showCustomParentInput.value = false
+}
+
+async function handleSaveChild() {
+  if (!list.value) return
+  const cleanName = childForm.name.trim()
+  const cleanParent = childForm.parentName.trim() || currentUser.value?.name || list.value.ownerName || 'Parent'
+  if (!cleanName) return
+
+  isSavingChild.value = true
+  try {
+    const matchedParent = adultMembers.value.find(
+      a => a.name.toLowerCase() === cleanParent.toLowerCase()
+    )
+    await addChildMember(list.value.id, {
+      id: editingChildId.value,
+      name: cleanName,
+      age: childForm.age !== undefined && childForm.age !== null && !isNaN(Number(childForm.age)) && Number(childForm.age) >= 0
+        ? Number(childForm.age)
+        : undefined,
+      parentId: matchedParent?.id || childForm.parentId,
+      parentName: cleanParent,
+      avatar: computedChildAvatar.value
+    })
+    selectedRecipient.value = cleanName
+    isChildModalOpen.value = false
+  } finally {
+    isSavingChild.value = false
+  }
+}
+
+async function handleRemoveChild(child: RecipientEntry) {
+  if (!list.value) return
+  if (confirm(`Voulez-vous retirer l'enfant ${child.name} de cette liste ?`)) {
+    await removeChildMember(list.value.id, child.id || child.name)
+    if (selectedRecipient.value.toLowerCase() === child.name.toLowerCase()) {
+      selectedRecipient.value = 'all'
+    }
+  }
+}
 
 if (import.meta.server || !list.value) {
   await fetchListById(listId.value)
@@ -287,8 +501,22 @@ async function copyInviteCode() {
         <span>Toutes les listes</span>
       </NuxtLink>
 
-      <!-- Action buttons: Share & Edit -->
+      <!-- Action buttons: Add Child, Share & Edit -->
       <div class="flex items-center gap-2">
+        <button
+          @click="openChildModal()"
+          type="button"
+          class="flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-bold transition-all shadow-subtle active:scale-98 border"
+          :class="isChristmasList
+            ? 'border-amber-300/80 dark:border-amber-600/50 bg-white/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
+            : 'border-sky-200 dark:border-sky-800/80 bg-sky-50/90 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/60'"
+          title="Ajouter un enfant rattaché à un parent"
+        >
+          <Baby class="w-3.5 h-3.5 text-sky-500" />
+          <span class="hidden sm:inline">Ajouter un enfant</span>
+          <span class="sm:hidden">+ Enfant</span>
+        </button>
+
         <button
           @click="handleShare"
           type="button"
@@ -409,12 +637,14 @@ async function copyInviteCode() {
                 v-for="member in recipientsList"
                 :key="member.key"
                 type="button"
-                @click="selectedRecipient = selectedRecipient === member.name ? 'all' : member.name"
+                @click="selectedRecipient = selectedRecipient.toLowerCase() === member.name.toLowerCase() ? 'all' : member.name"
                 class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all border backdrop-blur-md"
                 :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
                   ? 'bg-white text-slate-900 border-white shadow-sm scale-105'
                   : 'bg-black/35 hover:bg-black/50 text-white border-white/20'"
-                :title="`Filtrer les cadeaux de ${member.name}`"
+                :title="member.isChild && member.parentName
+                  ? `Filtrer les cadeaux de ${member.name} (Enfant de ${member.parentName})`
+                  : `Filtrer les cadeaux de ${member.name}`"
               >
                 <img
                   v-if="member.avatar"
@@ -423,7 +653,10 @@ async function copyInviteCode() {
                   class="w-4 h-4 rounded-full object-cover bg-white/20"
                 />
                 <span>{{ member.name }}</span>
-                <span v-if="member.role === 'owner'" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
+                <span v-if="member.isChild" class="text-[10px]" :title="`Enfant rattaché à ${member.parentName || list.ownerName}`">
+                  👶<template v-if="member.age"> {{ member.age }}a</template>
+                </span>
+                <span v-else-if="member.role === 'owner'" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
               </button>
             </div>
 
@@ -489,7 +722,7 @@ async function copyInviteCode() {
       </div>
     </section>
 
-    <!-- Multi-person Family Members Tabs Navigation -->
+    <!-- Multi-person Family Members & Children Tabs Navigation -->
     <section aria-labelledby="members-section-title" class="space-y-3 relative z-10">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2">
@@ -500,26 +733,40 @@ async function copyInviteCode() {
             class="text-xs sm:text-sm font-bold uppercase tracking-wider"
             :class="isChristmasList ? 'text-amber-950 dark:text-amber-200 font-extrabold' : 'text-slate-800 dark:text-slate-200'"
           >
-            {{ isChristmasList ? 'Hotte de Noël par membre de la famille' : 'Membres & Cadeaux de la liste' }}
+            {{ isChristmasList ? 'Hotte de Noël par membre & enfant de la famille' : 'Membres, Enfants & Cadeaux de la liste' }}
           </h2>
         </div>
 
-        <button
-          @click="openAddItem()"
-          type="button"
-          class="inline-flex items-center gap-2 py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-extrabold transition-all shadow-md hover:scale-[1.02] active:scale-98 cursor-pointer"
-          :class="isChristmasList
-            ? 'gold-gradient-btn shadow-[0_4px_16px_rgba(234,179,8,0.4)]'
-            : 'bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white shadow-[0_4px_16px_rgba(225,29,72,0.35)]'"
-        >
-          <Plus class="w-4 h-4 stroke-[2.5]" />
-          <span>
-            {{ selectedRecipient !== 'all'
-              ? `Ajouter un cadeau pour ${selectedRecipient}`
-              : (isChristmasList ? 'Ajouter un cadeau à la hotte 🎁' : 'Ajouter un cadeau 🎁')
-            }}
-          </span>
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            @click="openChildModal()"
+            type="button"
+            class="inline-flex items-center gap-1.5 py-2 px-3.5 rounded-xl text-xs font-bold transition-all border shadow-subtle hover:scale-[1.01] active:scale-98 cursor-pointer"
+            :class="isChristmasList
+              ? 'bg-white/95 dark:bg-slate-900/95 border-amber-300 dark:border-amber-600/60 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
+              : 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/60'"
+          >
+            <Baby class="w-4 h-4 text-sky-500" />
+            <span>+ Ajouter un enfant 👶</span>
+          </button>
+
+          <button
+            @click="openAddItem()"
+            type="button"
+            class="inline-flex items-center gap-2 py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-extrabold transition-all shadow-md hover:scale-[1.02] active:scale-98 cursor-pointer"
+            :class="isChristmasList
+              ? 'gold-gradient-btn shadow-[0_4px_16px_rgba(234,179,8,0.4)]'
+              : 'bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white shadow-[0_4px_16px_rgba(225,29,72,0.35)]'"
+          >
+            <Plus class="w-4 h-4 stroke-[2.5]" />
+            <span>
+              {{ selectedRecipient !== 'all'
+                ? `Ajouter un cadeau pour ${selectedRecipient}`
+                : (isChristmasList ? 'Ajouter un cadeau à la hotte 🎁' : 'Ajouter un cadeau 🎁')
+              }}
+            </span>
+          </button>
+        </div>
       </div>
 
       <!-- Members Pills -->
@@ -550,7 +797,7 @@ async function copyInviteCode() {
           </span>
         </button>
 
-        <!-- Individual Family Member Buttons -->
+        <!-- Individual Family Member & Child Buttons -->
         <button
           v-for="member in recipientsList"
           :key="member.key"
@@ -561,20 +808,48 @@ async function copyInviteCode() {
             selectedRecipient.toLowerCase() === member.name.toLowerCase()
               ? (isChristmasList
                   ? 'gold-gradient-btn border-amber-400 font-extrabold'
-                  : 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white')
+                  : (member.isChild
+                      ? 'bg-sky-600 text-white border-sky-600'
+                      : 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white'))
               : (isChristmasList
                   ? 'bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-200 border-amber-300/60 dark:border-amber-700/50 hover:bg-amber-50 dark:hover:bg-slate-800'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800')
+                  : (member.isChild
+                      ? 'bg-sky-50/70 dark:bg-sky-950/30 text-sky-950 dark:text-sky-200 border-sky-200/90 dark:border-sky-800/60 hover:bg-sky-100/70 dark:hover:bg-sky-900/40'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'))
           ]"
         >
-          <img
-            v-if="member.avatar"
-            :src="member.avatar"
-            :alt="member.name"
-            class="w-4 h-4 rounded-full object-cover ring-1 ring-black/10"
-          />
-          <span v-else>🎁</span>
-          <span>{{ member.name }}</span>
+          <div class="relative shrink-0">
+            <img
+              v-if="member.avatar"
+              :src="member.avatar"
+              :alt="member.name"
+              class="w-5 h-5 rounded-full object-cover ring-1 ring-black/10"
+            />
+            <span v-else>{{ member.isChild ? '👶' : '🎁' }}</span>
+            <span
+              v-if="member.isChild"
+              class="absolute -bottom-1 -right-1 text-[9px] leading-none"
+              title="Enfant sans compte"
+            >
+              👶
+            </span>
+          </div>
+
+          <div class="text-left leading-tight">
+            <div class="flex items-center gap-1">
+              <span>{{ member.name }}</span>
+              <span v-if="member.isChild && member.age" class="text-[10px] opacity-80 font-semibold">
+                ({{ member.age }} ans)
+              </span>
+            </div>
+            <span
+              v-if="member.isChild && member.parentName"
+              class="block text-[9px] font-medium opacity-75"
+            >
+              Enfant de {{ member.parentName }}
+            </span>
+          </div>
+
           <span
             class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
             :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
@@ -583,6 +858,19 @@ async function copyInviteCode() {
           >
             {{ member.count }}
           </span>
+        </button>
+
+        <!-- Add Child pill button -->
+        <button
+          type="button"
+          @click="openChildModal()"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0 border border-dashed"
+          :class="isChristmasList
+            ? 'border-amber-400/80 dark:border-amber-600/60 text-amber-900 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-xmas-950/40'
+            : 'border-sky-300 dark:border-sky-700 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40 font-semibold'"
+        >
+          <Baby class="w-3.5 h-3.5 text-sky-500" />
+          <span>+ Enfant (sans compte)</span>
         </button>
 
         <!-- Invite family member button -->
@@ -599,64 +887,109 @@ async function copyInviteCode() {
           <span>{{ isChristmasList ? '+ Inviter un proche 🎄' : '+ Inviter un membre' }}</span>
         </button>
       </div>
+
+      <!-- Contextual Child Banner when a Child Tab is Selected -->
+      <div
+        v-if="selectedMemberObj && (selectedMemberObj.isChild || selectedMemberObj.role === 'child')"
+        class="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
+        :class="isChristmasList
+          ? 'bg-gradient-to-r from-amber-50/95 via-white/95 to-sky-50/90 dark:from-slate-900/95 dark:via-slate-900 dark:to-sky-950/40 border-amber-300/80 dark:border-amber-600/50 shadow-sm'
+          : 'bg-sky-50/80 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/60'"
+      >
+        <div class="flex items-center gap-3">
+          <div class="relative shrink-0">
+            <img
+              :src="selectedMemberObj.avatar"
+              :alt="selectedMemberObj.name"
+              class="w-11 h-11 rounded-2xl object-cover bg-white ring-2 ring-sky-300 dark:ring-sky-700 shadow-sm"
+            />
+            <span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-sky-500 text-white text-[11px] flex items-center justify-center shadow">
+              👶
+            </span>
+          </div>
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-sm font-extrabold text-slate-900 dark:text-white">
+                Souhaits de {{ selectedMemberObj.name }}
+              </h3>
+              <span
+                v-if="selectedMemberObj.age"
+                class="px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 text-[11px] font-bold"
+              >
+                {{ selectedMemberObj.age }} ans
+              </span>
+              <span class="px-2 py-0.5 rounded-full bg-white/90 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 text-[11px] font-semibold flex items-center gap-1">
+                <UserCheck class="w-3 h-3 text-emerald-500" />
+                <span>Rattaché à <strong>{{ selectedMemberObj.parentName || list.ownerName }}</strong></span>
+              </span>
+            </div>
+            <p class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+              Cet enfant n'a pas de compte : sa liste de cadeaux est gérée par <strong>{{ selectedMemberObj.parentName || list.ownerName }}</strong>.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            @click="openAddItem(selectedMemberObj.name)"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            <span>Ajouter un cadeau</span>
+          </button>
+
+          <button
+            v-if="canManageChild(selectedMemberObj)"
+            type="button"
+            @click="openChildModal(selectedMemberObj)"
+            class="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            title="Modifier les informations de l'enfant"
+            aria-label="Modifier l'enfant"
+          >
+            <Edit2 class="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            v-if="canManageChild(selectedMemberObj)"
+            type="button"
+            @click="handleRemoveChild(selectedMemberObj)"
+            class="p-2 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+            title="Retirer l'enfant de la liste"
+            aria-label="Retirer l'enfant"
+          >
+            <Trash2 class="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
     </section>
 
     <!-- Filters, Search & Stats Row -->
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1 relative z-10">
       <!-- Status Filters -->
-      <div
-        class="flex p-1 rounded-xl border shadow-subtle overflow-x-auto"
-        :class="isChristmasList
-          ? 'bg-white/95 dark:bg-slate-900/95 border-amber-300/70 dark:border-amber-700/50'
-          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'"
-      >
-        <button
-          @click="filterStatus = 'all'"
-          type="button"
-          class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
-          :class="filterStatus === 'all'
-            ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
-            : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-        >
-          Tous ({{ list.items.length }})
-        </button>
-
-        <button
-          @click="filterStatus = 'favorites'"
-          type="button"
-          class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors flex items-center gap-1"
-          :class="filterStatus === 'favorites'
-            ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
-            : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-        >
-          <Heart class="w-3 h-3 fill-current" :class="isChristmasList && filterStatus === 'favorites' ? 'text-amber-300' : ''" />
-          <span>{{ isChristmasList ? 'Coups de cœur ⭐' : 'Coups de cœur' }}</span>
-        </button>
-
-        <button
-          v-if="!isOwner"
+      <button
+          v-if="!isOwner || (selectedMemberObj && selectedMemberObj.isChild)"
           @click="filterStatus = 'available'"
           type="button"
           class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
           :class="filterStatus === 'available'
             ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
             : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-        >
-          {{ isChristmasList ? 'Disponibles sous le sapin' : 'Disponibles' }} ({{ list.items.filter(i => !i.isPurchased).length }})
-        </button>
+      >
+        {{ isChristmasList ? 'Disponibles sous le sapin' : 'Disponibles' }} ({{ list.items.filter(i => !i.isPurchased).length }})
+      </button>
 
-        <button
-          v-if="!isOwner"
+      <button
+          v-if="!isOwner || (selectedMemberObj && selectedMemberObj.isChild)"
           @click="filterStatus = 'purchased'"
           type="button"
           class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
           :class="filterStatus === 'purchased'
             ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
             : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-        >
-          {{ isChristmasList ? 'Réservés par les lutins 🎅' : 'Réservés' }} ({{ list.items.filter(i => i.isPurchased).length }})
-        </button>
-      </div>
+      >
+        {{ isChristmasList ? 'Réservés par les lutins 🎅' : 'Réservés' }} ({{ list.items.filter(i => i.isPurchased).length }})
+      </button>
 
       <!-- Search & Budget Estimate -->
       <div class="flex items-center gap-3">
@@ -748,6 +1081,8 @@ async function copyInviteCode() {
         :is-owner="isOwner"
         :owner-name="list.ownerName"
         :is-christmas="isChristmasList"
+        :can-manage="canManageItem(item)"
+        :child-info="getChildInfo(item.recipientName)"
         @edit="handleEditItem"
         @delete="handleDeleteItem"
       />
@@ -767,7 +1102,7 @@ async function copyInviteCode() {
           ? 'bg-gradient-to-br from-amber-100 to-amber-200 dark:from-xmas-900 dark:to-amber-950/60 border border-amber-300 text-amber-950'
           : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'"
       >
-        {{ isChristmasList ? '🎄' : '🎁' }}
+        {{ selectedMemberObj?.isChild ? '👶' : (isChristmasList ? '🎄' : '🎁') }}
       </div>
       <div>
         <h3
@@ -785,9 +1120,11 @@ async function copyInviteCode() {
           class="text-xs mt-1.5 max-w-xs mx-auto leading-relaxed"
           :class="isChristmasList ? 'text-amber-900/80 dark:text-amber-300/80 font-medium' : 'text-slate-500 dark:text-slate-400'"
         >
-          {{ selectedRecipient !== 'all'
-            ? `Ajoutez une première idée de cadeau pour ${selectedRecipient} en 1 clic !`
-            : 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !'
+          {{ selectedMemberObj?.isChild
+            ? `Ajoutez les envies de cadeaux de ${selectedMemberObj.name} (rattaché à ${selectedMemberObj.parentName || list.ownerName}) !`
+            : (selectedRecipient !== 'all'
+                ? `Ajoutez une première idée de cadeau pour ${selectedRecipient} en 1 clic !`
+                : 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !')
           }}
         </p>
       </div>
@@ -809,6 +1146,236 @@ async function copyInviteCode() {
         </span>
       </button>
     </div>
+
+    <!-- Child Management Modal (Add / Edit Child attached to a Parent) -->
+    <Transition name="modal">
+      <div
+        v-if="isChildModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="child-modal-title"
+      >
+        <div
+          class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+          @click="isChildModalOpen = false"
+        />
+
+        <div
+          class="relative w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-elevated p-5 sm:p-7 z-10 my-auto max-h-[92vh] flex flex-col"
+        >
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0 mb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center text-xl">
+                👶
+              </div>
+              <div>
+                <h3 id="child-modal-title" class="text-lg font-bold font-display text-slate-900 dark:text-white">
+                  {{ editingChildId ? 'Modifier le profil enfant' : 'Ajouter un enfant à la liste' }}
+                </h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                  Sans compte requis • Rattaché directement à un parent
+                </p>
+              </div>
+            </div>
+
+            <button
+              @click="isChildModalOpen = false"
+              type="button"
+              aria-label="Fermer"
+              class="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <form @submit.prevent="handleSaveChild" class="space-y-4 overflow-y-auto pr-1 flex-1">
+            <!-- Child Name & Age -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Prénom de l'enfant *
+                </label>
+                <input
+                  v-model="childForm.name"
+                  type="text"
+                  required
+                  placeholder="Ex: Lucas, Emma, Léo..."
+                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Âge (optionnel)
+                </label>
+                <div class="relative">
+                  <input
+                    v-model.number="childForm.age"
+                    type="number"
+                    min="0"
+                    max="18"
+                    placeholder="Ex: 6"
+                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 pr-10"
+                  />
+                  <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">
+                    ans
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Attached Parent Selection -->
+            <div class="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <UserCheck class="w-3.5 h-3.5 text-sky-500" />
+                  <span>Rattaché à quel parent ? *</span>
+                </label>
+                <button
+                  type="button"
+                  @click="showCustomParentInput = !showCustomParentInput"
+                  class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  {{ showCustomParentInput ? 'Choisir un membre' : '+ Autre parent' }}
+                </button>
+              </div>
+
+              <!-- Adult Member Pills -->
+              <div v-if="!showCustomParentInput" class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="adult in adultMembers"
+                  :key="adult.key"
+                  type="button"
+                  @click="selectParentForChild(adult)"
+                  class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border"
+                  :class="childForm.parentName.toLowerCase() === adult.name.toLowerCase()
+                    ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"
+                >
+                  <img
+                    v-if="adult.avatar"
+                    :src="adult.avatar"
+                    :alt="adult.name"
+                    class="w-4 h-4 rounded-full object-cover"
+                  />
+                  <span>{{ adult.name }}</span>
+                  <span v-if="currentUser?.name && adult.name.toLowerCase() === currentUser.name.toLowerCase()" class="text-[10px] opacity-80">
+                    (Vous)
+                  </span>
+                </button>
+              </div>
+
+              <!-- Custom Parent Input -->
+              <div v-else>
+                <input
+                  v-model="childForm.parentName"
+                  type="text"
+                  required
+                  placeholder="Prénom du parent (ex: Sophie, Thomas...)"
+                  class="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                Le parent rattaché peut ajouter, modifier et gérer les souhaits de l'enfant sans que l'enfant ait besoin de compte.
+              </p>
+            </div>
+
+            <!-- Avatar Picker -->
+            <div class="space-y-2">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Avatar de l'enfant
+              </label>
+              <div class="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  v-for="seed in childAvatarSeeds"
+                  :key="seed"
+                  type="button"
+                  @click="childForm.avatarSeed = seed"
+                  class="p-1.5 rounded-2xl border transition-all shrink-0"
+                  :class="childForm.avatarSeed === seed
+                    ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/60 ring-2 ring-sky-500/30 scale-105'
+                    : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'"
+                >
+                  <img
+                    :src="`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(seed)}`"
+                    :alt="seed"
+                    class="w-9 h-9 rounded-xl object-cover"
+                  />
+                </button>
+              </div>
+            </div>
+
+            <!-- Existing Children in List Summary -->
+            <div v-if="childrenMembers.length > 0 && !editingChildId" class="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div class="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Baby class="w-3.5 h-3.5 text-sky-500" />
+                <span>Enfants déjà inscrits dans cette liste ({{ childrenMembers.length }})</span>
+              </div>
+              <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                <div
+                  v-for="child in childrenMembers"
+                  :key="child.key"
+                  class="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 text-xs"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <img
+                      :src="child.avatar"
+                      :alt="child.name"
+                      class="w-7 h-7 rounded-full object-cover bg-white shrink-0"
+                    />
+                    <div class="truncate">
+                      <span class="font-bold text-slate-900 dark:text-white">{{ child.name }}</span>
+                      <span v-if="child.age" class="text-slate-500 dark:text-slate-400 ml-1">({{ child.age }} ans)</span>
+                      <span class="block text-[10px] text-slate-500 dark:text-slate-400">
+                        Rattaché à {{ child.parentName || list.ownerName }} • {{ child.count }} cadeau(x)
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="canManageChild(child)" class="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      @click="openChildModal(child)"
+                      class="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                      title="Modifier"
+                    >
+                      <Edit2 class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      @click="handleRemoveChild(child)"
+                      class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                      title="Retirer"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="pt-2">
+              <button
+                type="submit"
+                :disabled="!childForm.name.trim() || !childForm.parentName.trim() || isSavingChild"
+                class="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition-colors active:scale-98"
+              >
+                <Baby class="w-4 h-4" />
+                <span>
+                  {{ isSavingChild
+                    ? 'Enregistrement...'
+                    : (editingChildId ? 'Enregistrer les modifications' : `Ajouter ${childForm.name.trim() || 'l\'enfant'} à la liste`)
+                  }}
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Modals -->
     <AddItemModal

@@ -4,11 +4,21 @@ import {
   getListById,
   getLists,
   addMemberToList,
+  removeMemberFromList,
   saveItem,
   deleteItem,
   togglePurchaseItem,
   deleteList
 } from '../../server/utils/db'
+import {
+  mapRowToWishlist,
+  mapRowToWishlistItem,
+  mapWishlistToRow,
+  mapWishlistItemToRow
+} from '../../server/database/mappers'
+import { wishlistsTable, wishlistItemsTable } from '../../server/database/schema'
+import { InMemoryWishlistRepository } from '../../server/repositories/wishlist.repository'
+import { WishlistService } from '../../server/services/wishlist.service'
 import type { Wishlist, WishlistItem } from '../../types'
 
 describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
@@ -103,6 +113,93 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     expect(marcLists.map(l => l.id)).toContain(testListId)
   })
 
+  it('gère l’ajout, la mise à jour, la conservation après édition de liste et le retrait d’un enfant sans compte rattaché à un parent', async () => {
+    await saveList({
+      id: testListId,
+      ownerId: 'user-owner-1',
+      ownerName: 'Sophie',
+      title: 'Noël Famille',
+      category: 'christmas',
+      inviteCode: testInviteCode,
+      members: [],
+      items: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    // 1. Ajout de l'enfant Lucas rattaché à Sophie
+    const withChild = await addMemberToList(testListId, {
+      id: 'child-lucas-1',
+      name: 'Lucas',
+      role: 'child',
+      isChild: true,
+      parentId: 'user-owner-1',
+      parentName: 'Sophie',
+      age: 7
+    })
+
+    expect(withChild).not.toBeNull()
+    expect(withChild!.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'child-lucas-1',
+          name: 'Lucas',
+          role: 'child',
+          isChild: true,
+          parentId: 'user-owner-1',
+          parentName: 'Sophie',
+          age: 7
+        })
+      ])
+    )
+
+    // 2. Mise à jour de l'âge de Lucas sans créer de doublon
+    const afterUpdateChild = await addMemberToList(testListId, {
+      id: 'child-lucas-1',
+      name: 'Lucas',
+      role: 'child',
+      isChild: true,
+      parentId: 'user-owner-1',
+      parentName: 'Sophie',
+      age: 8
+    })
+
+    const lucasEntries = (afterUpdateChild!.members as any[]).filter(
+      m => typeof m === 'object' && m.name === 'Lucas'
+    )
+    expect(lucasEntries).toHaveLength(1)
+    expect(lucasEntries[0].age).toBe(8)
+    expect(lucasEntries[0].parentName).toBe('Sophie')
+
+    // 3. Conservation de l'enfant lors d'une modification des métadonnées de la liste
+    const afterListEdit = await saveList({
+      ...afterUpdateChild!,
+      title: 'Noël Famille 2026',
+      members: ['user-owner-1']
+    })
+    expect(afterListEdit.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'child-lucas-1',
+          name: 'Lucas',
+          role: 'child',
+          isChild: true,
+          parentName: 'Sophie',
+          age: 8
+        })
+      ])
+    )
+
+    // 4. Retrait de l'enfant par ID
+    const afterRemove = await removeMemberFromList(testListId, 'child-lucas-1')
+    expect(afterRemove).not.toBeNull()
+    const remainingNames = (afterRemove!.members as any[]).map(m =>
+      typeof m === 'object' ? m.name : m
+    )
+    expect(remainingNames).not.toContain('Lucas')
+    expect(remainingNames).toContain('Sophie')
+  })
+
   it('gère l’ajout, la modification, la réservation secrète et la suppression de cadeaux', async () => {
     await saveList({
       id: testListId,
@@ -159,5 +256,63 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
 
     const listAfterDelete = await getListById(testListId)
     expect(listAfterDelete?.items).toHaveLength(0)
+  })
+
+  it('valide les mappers bidirectionnels Drizzle ORM <-> Entités Domaine et l’injection de Repository', async () => {
+    expect(wishlistsTable).toBeDefined()
+    expect(wishlistItemsTable).toBeDefined()
+
+    const now = new Date('2026-12-01T12:00:00.000Z')
+    const domainList: Wishlist = {
+      id: 'list-orm-1',
+      ownerId: 'owner-1',
+      ownerName: 'Camille',
+      title: 'Noël ORM',
+      category: 'christmas',
+      inviteCode: 'ORM123',
+      members: [{ id: 'owner-1', name: 'Camille', role: 'owner' }],
+      items: [],
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }
+
+    const dbRow = mapWishlistToRow(domainList, now)
+    expect(dbRow.ownerId).toBe('owner-1')
+    expect(dbRow.inviteCode).toBe('ORM123')
+
+    const domainItem: WishlistItem = {
+      id: 'item-orm-1',
+      listId: 'list-orm-1',
+      title: 'Livre Architecture Logicielle',
+      price: 45.5,
+      currency: '€',
+      quantity: 2,
+      priority: 'high',
+      isFavorite: true,
+      isPurchased: true,
+      purchasedBy: { isAnonymous: true, name: 'Père Noël Secret' },
+      purchasedAt: now.toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }
+
+    const itemRow = mapWishlistItemToRow('list-orm-1', domainItem, now)
+    expect(itemRow.price).toBe('45.5')
+    expect(itemRow.quantity).toBe(2)
+
+    const roundTripItem = mapRowToWishlistItem(itemRow as any)
+    expect(roundTripItem.price).toBe(45.5)
+    expect(roundTripItem.purchasedBy?.name).toBe('Père Noël Secret')
+
+    const roundTripList = mapRowToWishlist(dbRow as any, [roundTripItem])
+    expect(roundTripList.id).toBe('list-orm-1')
+    expect(roundTripList.items).toHaveLength(1)
+
+    // Test de l'isolation par injection de dépendance dans WishlistService
+    const isolatedRepo = new InMemoryWishlistRepository()
+    const isolatedService = new WishlistService(async () => isolatedRepo)
+    await isolatedService.saveList(domainList)
+    const fetched = await isolatedService.getListById('orm123')
+    expect(fetched?.title).toBe('Noël ORM')
   })
 })

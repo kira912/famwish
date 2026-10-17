@@ -109,4 +109,100 @@ test.describe('Parcours critique E2E FamWish', () => {
     await ownerContext.close()
     await guestContext.close()
   })
+
+  test('Gestion complète d’un enfant sans compte rattaché à un parent dans /lists/[id] (ajout, souhaits, réservation, modification et suppression)', async ({ browser }) => {
+    const parentContext = await browser.newContext()
+    const parentPage = await parentContext.newPage()
+
+    // 1. Sophie crée une liste de famille
+    await parentPage.goto('/')
+    await parentPage.getByRole('button', { name: /Créer une liste/i }).first().click()
+    await parentPage.getByPlaceholder(/Ex: Mes souhaits pour Noël/i).fill('Noël des Enfants 2026')
+    await parentPage.getByPlaceholder(/Ex: Sophie, Papa, Julien/i).fill('Sophie')
+    await parentPage.getByRole('button', { name: /Créer la liste/i }).click()
+
+    await expect(parentPage).toHaveURL(/\/lists\/list-/)
+    const listUrl = parentPage.url()
+
+    const inviteCodeBtn = parentPage.locator('button[title="Cliquer pour copier le code"]')
+    const inviteCode = (await inviteCodeBtn.innerText()).trim()
+
+    // 2. Sophie clique sur "+ Ajouter un enfant 👶"
+    await parentPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /\+ Ajouter un enfant/i }).click()
+    const childDialog = parentPage.getByRole('dialog')
+    await expect(childDialog).toBeVisible()
+    await expect(childDialog.locator('#child-modal-title')).toHaveText('Ajouter un enfant à la liste')
+
+    // Remplir le prénom et l'âge de l'enfant (Lucas, 7 ans), rattaché à Sophie
+    await childDialog.getByPlaceholder(/Ex: Lucas, Emma, Léo/i).fill('Lucas')
+    await childDialog.getByPlaceholder(/Ex: 6/i).fill('7')
+    await expect(childDialog.getByRole('button', { name: /Sophie/i })).toBeVisible()
+    await childDialog.getByRole('button', { name: /Ajouter Lucas à la liste/i }).click()
+
+    // 3. Vérifier l'affichage de l'enfant dans les onglets, l'en-tête et le bandeau contextuel enfant
+    await expect(parentPage.getByText('Membres (2) :')).toBeVisible()
+    await expect(parentPage.locator('section[aria-labelledby="list-detail-title"]')).toContainText('Lucas')
+    await expect(parentPage.locator('section[aria-labelledby="members-section-title"]')).toContainText('Enfant de Sophie')
+    await expect(parentPage.getByRole('heading', { name: 'Souhaits de Lucas' })).toBeVisible()
+    await expect(parentPage.getByText(/Cet enfant n'a pas de compte : sa liste de cadeaux est gérée par/i)).toBeVisible()
+
+    // 4. Sophie ajoute un cadeau pour son enfant Lucas
+    await parentPage.getByRole('button', { name: /Ajouter un cadeau pour Lucas/i }).first().click()
+    const addGiftModal = parentPage.getByRole('dialog')
+    await expect(addGiftModal).toBeVisible()
+    await addGiftModal.getByPlaceholder(/Ex: Lego Star Wars/i).fill('Château Lego Harry Potter')
+    await addGiftModal.getByPlaceholder(/Ex: 49.99/i).fill('119.99')
+    await addGiftModal.getByRole('button', { name: /Ajouter à la liste/i }).click()
+
+    // Vérifier la carte du cadeau avec le badge enfant + rattachement au parent
+    await expect(parentPage.getByRole('heading', { name: 'Château Lego Harry Potter' })).toBeVisible()
+    await expect(parentPage.getByText('Pour Lucas', { exact: true }).first()).toBeVisible()
+
+    // 5. Un proche (Tonton Marc) rejoint la liste, réserve le cadeau de Lucas et ajoute sa propre fille Emma
+    const relativeContext = await browser.newContext()
+    const relativePage = await relativeContext.newPage()
+
+    await relativePage.goto(`/join?code=${encodeURIComponent(inviteCode)}`)
+    await relativePage.getByPlaceholder(/Ex: Papy André, Manon, Sophie/i).fill('Tonton Marc')
+    await relativePage.getByRole('button', { name: /Accéder à la liste/i }).click()
+    await expect(relativePage).toHaveURL(listUrl)
+
+    // Tonton Marc filtre sur Lucas et réserve son cadeau
+    await relativePage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).click()
+    await expect(relativePage.getByRole('heading', { name: 'Château Lego Harry Potter' })).toBeVisible()
+    await relativePage.getByRole('button', { name: /Mettre dans ma hotte pour Noël|Réserver ce cadeau/i }).click()
+    await relativePage.getByRole('button', { name: /Confirmer la réservation/i }).click()
+    await expect(relativePage.getByText(/Réservé par vous/i)).toBeVisible()
+
+    // Tonton Marc ajoute sa fille Emma (5 ans), rattachée à Tonton Marc
+    await relativePage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /\+ Ajouter un enfant/i }).click()
+    const marcChildDialog = relativePage.getByRole('dialog')
+    await marcChildDialog.getByPlaceholder(/Ex: Lucas, Emma, Léo/i).fill('Emma')
+    await marcChildDialog.getByPlaceholder(/Ex: 6/i).fill('5')
+    await marcChildDialog.getByRole('button', { name: /Ajouter Emma à la liste/i }).click()
+
+    await expect(relativePage.getByRole('heading', { name: 'Souhaits de Emma' })).toBeVisible()
+    await expect(relativePage.locator('section[aria-labelledby="members-section-title"]')).toContainText('Enfant de Tonton Marc')
+
+    // Tonton Marc modifie l'âge d'Emma (de 5 à 6 ans)
+    await relativePage.getByRole('button', { name: 'Modifier l\'enfant' }).click()
+    const editChildDialog = relativePage.getByRole('dialog')
+    await expect(editChildDialog.locator('#child-modal-title')).toHaveText('Modifier le profil enfant')
+    await editChildDialog.getByPlaceholder(/Ex: 6/i).fill('6')
+    await editChildDialog.getByRole('button', { name: /Enregistrer les modifications/i }).click()
+    await expect(relativePage.locator('section[aria-labelledby="members-section-title"]')).toContainText('(6 ans)')
+
+    // 6. Retour côté Sophie (Parent de Lucas) : comme Lucas n'a pas de compte, Sophie voit que le cadeau de Lucas est réservé pour éviter les doublons
+    await parentPage.reload()
+    await parentPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).click()
+    await expect(parentPage.getByText(/Déjà réservé|Déjà dans la hotte/i).first()).toBeVisible()
+
+    // 7. Suppression d'Emma par Tonton Marc
+    relativePage.once('dialog', dialog => dialog.accept())
+    await relativePage.getByRole('button', { name: 'Retirer l\'enfant' }).click()
+    await expect(relativePage.getByRole('heading', { name: 'Souhaits de Emma' })).toHaveCount(0)
+
+    await parentContext.close()
+    await relativeContext.close()
+  })
 })

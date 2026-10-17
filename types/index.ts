@@ -39,7 +39,11 @@ export interface WishlistMember {
   name: string
   avatar?: string
   joinedAt?: string
-  role?: 'owner' | 'member'
+  role?: 'owner' | 'member' | 'child'
+  isChild?: boolean
+  parentId?: string
+  parentName?: string
+  age?: number
 }
 
 export interface Wishlist {

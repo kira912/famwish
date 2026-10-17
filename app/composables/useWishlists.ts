@@ -383,7 +383,19 @@ export function useWishlists() {
     }
   }
 
-  function ensureLocalMemberAdded(target: Wishlist, user: { id?: string; name: string; avatar?: string }) {
+  function ensureLocalMemberAdded(
+    target: Wishlist,
+    user: {
+      id?: string
+      name: string
+      avatar?: string
+      role?: 'owner' | 'member' | 'child'
+      isChild?: boolean
+      parentId?: string
+      parentName?: string
+      age?: number
+    }
+  ) {
     const cleanName = user.name.trim()
     if (!cleanName) return
     if (!Array.isArray(target.members)) {
@@ -393,17 +405,27 @@ export function useWishlists() {
       if (typeof m === 'string') return m === user.id || m.toLowerCase() === cleanName.toLowerCase()
       return (user.id && m?.id === user.id) || (m?.name && String(m.name).trim().toLowerCase() === cleanName.toLowerCase())
     })
+    const isChildMember = Boolean(user.isChild || user.role === 'child')
     const memberObj: WishlistMember = {
-      id: user.id || `user-${Date.now()}`,
+      id: user.id || (isChildMember ? `child-${Date.now()}` : `user-${Date.now()}`),
       name: cleanName,
       avatar: user.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
       joinedAt: new Date().toISOString(),
-      role: user.id === target.ownerId ? 'owner' : 'member'
+      role: isChildMember ? 'child' : (user.id === target.ownerId ? 'owner' : 'member'),
+      ...(isChildMember
+        ? {
+            isChild: true,
+            parentId: user.parentId,
+            parentName: user.parentName,
+            age: user.age
+          }
+        : {})
     }
     if (existingIdx >= 0) {
-      if (typeof target.members[existingIdx] === 'string') {
-        target.members[existingIdx] = memberObj
-      }
+      const existing = target.members[existingIdx]
+      target.members[existingIdx] = typeof existing === 'object' && existing !== null
+        ? { ...existing, ...memberObj }
+        : memberObj
     } else {
       target.members.push(memberObj)
     }
@@ -440,6 +462,95 @@ export function useWishlists() {
       }
     } catch (e) {
       console.warn('Could not register join on server:', e)
+    }
+    return target || null
+  }
+
+  async function addChildMember(
+    listIdOrCode: string,
+    child: {
+      id?: string
+      name: string
+      age?: number
+      parentId?: string
+      parentName: string
+      avatar?: string
+    }
+  ): Promise<Wishlist | null> {
+    const cleanName = child.name.trim()
+    const cleanParentName = child.parentName.trim()
+    if (!cleanName || !cleanParentName) return null
+
+    const childPayload = {
+      id: child.id || `child-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: cleanName,
+      avatar: child.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
+      role: 'child' as const,
+      isChild: true,
+      parentId: child.parentId,
+      parentName: cleanParentName,
+      age: child.age !== undefined && child.age !== null && !isNaN(Number(child.age)) ? Number(child.age) : undefined
+    }
+
+    let target = getList(listIdOrCode)
+    if (target) {
+      ensureLocalMemberAdded(target, childPayload)
+      persistCache()
+    }
+
+    try {
+      const res = await $fetch<{ success: boolean; member: any; list: Wishlist }>(`/api/lists/${encodeURIComponent(listIdOrCode)}/join`, {
+        method: 'POST',
+        body: childPayload
+      })
+      if (res?.list) {
+        const idx = lists.value.findIndex(l => l.id === res.list.id)
+        if (idx >= 0) {
+          lists.value[idx] = res.list
+        } else {
+          lists.value.unshift(res.list)
+        }
+        persistCache()
+        toast.festive('👶 Enfant enregistré !', `${cleanName} (rattaché à ${cleanParentName}) a été ajouté à la liste.`)
+        return res.list
+      }
+    } catch (e) {
+      toast.success('👶 Enfant ajouté', `${cleanName} (rattaché à ${cleanParentName})`)
+    }
+    return target || null
+  }
+
+  async function removeChildMember(listIdOrCode: string, memberIdOrName: string): Promise<Wishlist | null> {
+    const cleanKey = memberIdOrName.trim().toLowerCase()
+    if (!cleanKey) return null
+
+    const target = getList(listIdOrCode)
+    if (target && Array.isArray(target.members)) {
+      target.members = target.members.filter((m: any) => {
+        if (typeof m === 'string') return m.trim().toLowerCase() !== cleanKey
+        const idMatch = m?.id && String(m.id).trim().toLowerCase() === cleanKey
+        const nameMatch = m?.name && String(m.name).trim().toLowerCase() === cleanKey
+        return !idMatch && !nameMatch
+      })
+      persistCache()
+    }
+
+    try {
+      const res = await $fetch<{ success: boolean; list: Wishlist }>(
+        `/api/lists/${encodeURIComponent(listIdOrCode)}/members/${encodeURIComponent(memberIdOrName)}`,
+        { method: 'DELETE' }
+      )
+      if (res?.list) {
+        const idx = lists.value.findIndex(l => l.id === res.list.id)
+        if (idx >= 0) {
+          lists.value[idx] = res.list
+        }
+        persistCache()
+        toast.info('Enfant retiré de la liste')
+        return res.list
+      }
+    } catch (e) {
+      toast.info('Enfant retiré de la liste')
     }
     return target || null
   }
@@ -520,6 +631,8 @@ export function useWishlists() {
     togglePurchase,
     joinListByCode,
     syncMemberOnServer,
+    addChildMember,
+    removeChildMember,
     triggerConfetti
   }
 }

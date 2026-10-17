@@ -1,5 +1,5 @@
 import { defineEventHandler, getQuery } from 'h3'
-import { getLists } from '../../utils/db'
+import { wishlistService } from '../../services/wishlist.service'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -9,5 +9,5 @@ export default defineEventHandler(async (event) => {
     ? joinedIdsStr.split(',').map(s => s.trim()).filter(Boolean)
     : []
 
-  return await getLists(userId, joinedIds)
+  return wishlistService.getLists(userId, joinedIds)
 })

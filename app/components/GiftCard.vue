@@ -4,7 +4,6 @@ import {
   ExternalLink,
   Heart,
   CheckCircle2,
-  Lock,
   MoreVertical,
   Edit2,
   Trash2,
@@ -14,6 +13,7 @@ import {
   Palette,
   Check,
   User,
+  Baby,
   X
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
@@ -26,9 +26,17 @@ const props = withDefaults(
     isOwner: boolean
     ownerName: string
     isChristmas?: boolean
+    canManage?: boolean
+    childInfo?: {
+      name: string
+      parentName?: string
+      age?: number
+    } | null
   }>(),
   {
-    isChristmas: false
+    isChristmas: false,
+    canManage: undefined,
+    childInfo: null
   }
 )
 
@@ -56,8 +64,9 @@ const domainName = computed(() => {
   }
 })
 
-// Check if this gift is intended for the logged-in user or list owner
+// Check if this gift is intended for the logged-in adult user (note: a child has no account, so isItemForMe is false for children)
 const isItemForMe = computed(() => {
+  if (props.childInfo) return false
   const currentName = currentUser.value?.name ? String(currentUser.value.name).trim().toLowerCase() : ''
   const itemRec = typeof props.item.recipientName === 'string' ? props.item.recipientName.trim() : ''
   const owner = typeof props.ownerName === 'string' ? props.ownerName.trim() : ''
@@ -72,6 +81,11 @@ const isItemForMe = computed(() => {
   }
 
   return false
+})
+
+const canEditOrDelete = computed(() => {
+  if (props.canManage !== undefined) return props.canManage
+  return props.isOwner || isItemForMe.value
 })
 
 const isPurchasedByMe = computed(() => {
@@ -147,19 +161,24 @@ async function handleCancelReservation() {
         <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
 
         <!-- Top Badges Row -->
-        <div class="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+        <div class="absolute top-3 left-3 right-3 flex items-start justify-between gap-2 pointer-events-none">
           <div class="flex items-center gap-1.5 flex-wrap">
             <!-- Recipient Badge (Pour X) -->
             <div
               v-if="item.recipientName"
               class="pointer-events-auto flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold shadow-sm"
-              :class="isChristmas
-                ? 'bg-amber-50/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-200 border border-amber-300/80 dark:border-amber-500/50'
-                : 'bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700/60'"
+              :class="childInfo
+                ? 'bg-sky-50/95 dark:bg-sky-950/95 text-sky-900 dark:text-sky-200 border border-sky-300/80 dark:border-sky-600/50'
+                : (isChristmas
+                    ? 'bg-amber-50/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-200 border border-amber-300/80 dark:border-amber-500/50'
+                    : 'bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700/60')"
+              :title="childInfo?.parentName ? `Enfant rattaché à ${childInfo.parentName}` : undefined"
             >
-              <span v-if="isChristmas" class="text-[11px]">🎅</span>
+              <span v-if="childInfo" class="text-[11px]">👶</span>
+              <span v-else-if="isChristmas" class="text-[11px]">🎅</span>
               <User v-else class="w-3 h-3 text-rose-500" />
               <span>Pour {{ item.recipientName }}</span>
+              <span v-if="childInfo?.age" class="opacity-75 text-[10px]">({{ childInfo.age }} ans)</span>
             </div>
 
             <!-- Favorite Badge -->
@@ -175,55 +194,57 @@ async function handleCancelReservation() {
             </div>
           </div>
 
-          <!-- Owner Actions Menu -->
-          <div v-if="isOwner" class="pointer-events-auto relative">
-            <button
-              @click="isMenuOpen = !isMenuOpen"
-              type="button"
-              aria-label="Options du cadeau"
-              class="p-1.5 rounded-xl text-slate-700 dark:text-slate-200 transition-colors shadow-sm"
-              :class="isChristmas
-                ? 'bg-white/95 dark:bg-slate-900/95 hover:bg-amber-50 dark:hover:bg-slate-800 border border-amber-300/50'
-                : 'bg-white/90 dark:bg-slate-900/90 hover:bg-white dark:hover:bg-slate-800'"
-            >
-              <MoreVertical class="w-4 h-4" />
-            </button>
-
-            <!-- Dropdown menu -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <!-- Non-Recipient Reservation Status Tag -->
             <div
-              v-if="isMenuOpen"
-              class="absolute right-0 top-full mt-1.5 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-elevated border p-1.5 z-20 space-y-0.5"
-              :class="isChristmas ? 'border-amber-300/60 dark:border-amber-600/40' : 'border-slate-200 dark:border-slate-700'"
+              v-if="item.isPurchased && !isItemForMe"
+              class="pointer-events-auto px-2.5 py-1 rounded-full text-[11px] font-semibold shadow-sm flex items-center gap-1.5"
+              :class="isChristmas
+                ? 'bg-emerald-700 text-amber-100 border border-amber-300/50'
+                : 'bg-emerald-600 text-white'"
             >
-              <button
-                @click="isMenuOpen = false; emit('edit', item)"
-                type="button"
-                class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-left"
-              >
-                <Edit2 class="w-3.5 h-3.5" />
-                <span>Modifier</span>
-              </button>
-              <button
-                @click="isMenuOpen = false; emit('delete', item.id)"
-                type="button"
-                class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors text-left"
-              >
-                <Trash2 class="w-3.5 h-3.5" />
-                <span>Supprimer</span>
-              </button>
+              <CheckCircle2 class="w-3.5 h-3.5 text-amber-300" />
+              <span>{{ isPurchasedByMe ? 'Réservé par vous 🎁' : 'Déjà réservé 🤫' }}</span>
             </div>
-          </div>
 
-          <!-- Non-Recipient Reservation Status Tag -->
-          <div
-            v-else-if="item.isPurchased && !isItemForMe"
-            class="pointer-events-auto px-2.5 py-1 rounded-full text-[11px] font-semibold shadow-sm flex items-center gap-1.5"
-            :class="isChristmas
-              ? 'bg-emerald-700 text-amber-100 border border-amber-300/50'
-              : 'bg-emerald-600 text-white'"
-          >
-            <CheckCircle2 class="w-3.5 h-3.5 text-amber-300" />
-            <span>{{ isPurchasedByMe ? 'Réservé par vous 🎁' : 'Déjà réservé 🤫' }}</span>
+            <!-- Owner / Parent Actions Menu -->
+            <div v-if="canEditOrDelete" class="pointer-events-auto relative">
+              <button
+                @click="isMenuOpen = !isMenuOpen"
+                type="button"
+                aria-label="Options du cadeau"
+                class="p-1.5 rounded-xl text-slate-700 dark:text-slate-200 transition-colors shadow-sm"
+                :class="isChristmas
+                  ? 'bg-white/95 dark:bg-slate-900/95 hover:bg-amber-50 dark:hover:bg-slate-800 border border-amber-300/50'
+                  : 'bg-white/90 dark:bg-slate-900/90 hover:bg-white dark:hover:bg-slate-800'"
+              >
+                <MoreVertical class="w-4 h-4" />
+              </button>
+
+              <!-- Dropdown menu -->
+              <div
+                v-if="isMenuOpen"
+                class="absolute right-0 top-full mt-1.5 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-elevated border p-1.5 z-20 space-y-0.5"
+                :class="isChristmas ? 'border-amber-300/60 dark:border-amber-600/40' : 'border-slate-200 dark:border-slate-700'"
+              >
+                <button
+                  @click="isMenuOpen = false; emit('edit', item)"
+                  type="button"
+                  class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-left"
+                >
+                  <Edit2 class="w-3.5 h-3.5" />
+                  <span>Modifier</span>
+                </button>
+                <button
+                  @click="isMenuOpen = false; emit('delete', item.id)"
+                  type="button"
+                  class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors text-left"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                  <span>Supprimer</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -250,6 +271,15 @@ async function handleCancelReservation() {
 
       <!-- Content Card Body -->
       <div class="p-4 sm:p-5 space-y-3">
+        <!-- Child Parent Subtitle if applicable -->
+        <div
+          v-if="childInfo?.parentName"
+          class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 border border-sky-200/70 dark:border-sky-800/50 text-[11px] font-medium text-sky-800 dark:text-sky-300"
+        >
+          <Baby class="w-3 h-3 text-sky-500 shrink-0" />
+          <span>Enfant de <strong>{{ childInfo.parentName }}</strong></span>
+        </div>
+
         <!-- Title -->
         <h4 class="font-bold text-slate-900 dark:text-white text-base leading-snug line-clamp-2">
           {{ item.title }}
@@ -308,7 +338,7 @@ async function handleCancelReservation() {
         <ExternalLink class="w-3.5 h-3.5 group-hover/link:translate-x-0.5 transition-transform" />
       </a>
 
-      <!-- Reservation Section for Guests -->
+      <!-- Reservation Section for Guests / Relatives / Parents of a child -->
       <div v-if="!isItemForMe">
         <!-- Item Not Purchased Yet -->
         <div v-if="!item.isPurchased">

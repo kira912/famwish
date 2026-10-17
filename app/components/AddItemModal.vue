@@ -10,7 +10,8 @@ import {
   Heart,
   Image as ImageIcon,
   User,
-  Users
+  Users,
+  Baby
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
@@ -40,38 +41,65 @@ function ensureString(val: unknown): string {
   return ''
 }
 
-// Existing recipients in this list (owner + joined members + item recipients)
-const existingRecipients = computed(() => {
-  const map = new Map<string, string>()
-  const addName = (raw?: unknown) => {
+interface RecipientOption {
+  name: string
+  isChild?: boolean
+  parentName?: string
+  age?: number
+  avatar?: string
+}
+
+// Existing recipients in this list (owner + joined members + children + item recipients)
+const existingRecipientOptions = computed<RecipientOption[]>(() => {
+  const map = new Map<string, RecipientOption>()
+  const addOption = (raw?: unknown, meta?: Partial<RecipientOption>) => {
     if (typeof raw !== 'string') return
     const clean = raw.trim()
-    if (!clean || clean.startsWith('user-') || clean.startsWith('google-')) return
+    if (!clean || clean.startsWith('user-') || clean.startsWith('google-') || clean.startsWith('child-')) return
     const key = clean.toLowerCase()
     if (!map.has(key)) {
-      map.set(key, clean)
+      map.set(key, {
+        name: clean,
+        isChild: meta?.isChild,
+        parentName: meta?.parentName,
+        age: meta?.age,
+        avatar: meta?.avatar
+      })
+    } else if (meta) {
+      const existing = map.get(key)!
+      if (meta.isChild) existing.isChild = true
+      if (meta.parentName) existing.parentName = meta.parentName
+      if (meta.age !== undefined) existing.age = meta.age
+      if (meta.avatar) existing.avatar = meta.avatar
     }
   }
 
-  addName(currentUser.value?.name)
-  addName(currentList.value?.ownerName)
+  addOption(currentUser.value?.name, { avatar: currentUser.value?.avatar })
+  addOption(currentList.value?.ownerName, { avatar: currentList.value?.ownerAvatar })
 
   if (Array.isArray(currentList.value?.members)) {
     currentList.value!.members.forEach((m: any) => {
       if (typeof m === 'object' && m !== null && m.name) {
-        addName(m.name)
+        addOption(m.name, {
+          isChild: Boolean(m.isChild || m.role === 'child'),
+          parentName: m.parentName,
+          age: m.age,
+          avatar: m.avatar
+        })
       } else if (typeof m === 'string') {
-        addName(m)
+        addOption(m)
       }
     })
   }
 
   currentList.value?.items.forEach(i => {
-    addName(i.recipientName)
+    addOption(i.recipientName, { avatar: i.recipientAvatar })
   })
 
   return Array.from(map.values())
 })
+
+const existingRecipients = computed(() => existingRecipientOptions.value.map(o => o.name))
 
 const activeTab = ref<'link' | 'manual'>('link')
 const isFetchingPreview = ref(false)
@@ -213,13 +241,14 @@ async function handleSubmit() {
 
   const finalUrl = ensureString(form.url).trim() || (activeTab.value === 'link' ? ensureString(rawUrlInput.value).trim() : '') || undefined
 
+  const matchedOption = existingRecipientOptions.value.find(o => o.name.toLowerCase() === recipient.toLowerCase())
   const isCurrentLoggedIn = currentUser.value?.name && recipient.toLowerCase() === currentUser.value.name.toLowerCase()
 
   const payload: Partial<WishlistItem> = {
     title,
     recipientName: recipient,
     recipientId: isCurrentLoggedIn ? currentUser.value?.id : undefined,
-    recipientAvatar: isCurrentLoggedIn ? currentUser.value?.avatar : undefined,
+    recipientAvatar: matchedOption?.avatar || (isCurrentLoggedIn ? currentUser.value?.avatar : undefined),
     description: ensureString(form.description).trim() || undefined,
     url: finalUrl,
     imageUrl: ensureString(form.imageUrl).trim() || undefined,
@@ -391,17 +420,24 @@ async function handleSubmit() {
             <!-- Existing Recipients Pills -->
             <div v-if="!showCustomRecipient" class="flex flex-wrap gap-1.5">
               <button
-                v-for="rec in existingRecipients"
-                :key="rec"
+                v-for="rec in existingRecipientOptions"
+                :key="rec.name"
                 type="button"
-                @click="selectRecipient(rec)"
+                @click="selectRecipient(rec.name)"
                 class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border"
-                :class="form.recipientName.toLowerCase() === rec.toLowerCase()
+                :class="form.recipientName.toLowerCase() === rec.name.toLowerCase()
                   ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"
               >
-                <User class="w-3 h-3 opacity-70" />
-                <span>Pour {{ rec }}</span>
+                <Baby v-if="rec.isChild" class="w-3.5 h-3.5 shrink-0" :class="form.recipientName.toLowerCase() === rec.name.toLowerCase() ? 'text-white' : 'text-sky-500'" />
+                <User v-else class="w-3 h-3 opacity-70 shrink-0" />
+                <span>Pour {{ rec.name }}</span>
+                <span
+                  v-if="rec.isChild && rec.parentName"
+                  class="text-[10px] opacity-80"
+                >
+                  (👶 {{ rec.parentName }})
+                </span>
               </button>
             </div>
 

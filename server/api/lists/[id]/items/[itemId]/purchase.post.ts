@@ -1,21 +1,21 @@
-import { defineEventHandler, getRouterParam, readBody, createError } from 'h3'
+import { defineEventHandler, readBody, createError } from 'h3'
+import { wishlistService } from '#server/services/wishlist.service.ts'
+import { requireRouterParam } from '#server/utils/validation.ts'
+
+interface PurchaseRequestBody {
+  purchased?: boolean
+  purchaserName?: string
+  anonymous?: boolean
+  userId?: string
+}
 
 export default defineEventHandler(async (event) => {
-  const listId = getRouterParam(event, 'id')
-  const itemId = getRouterParam(event, 'itemId')
+  const listId = requireRouterParam(event, 'id', 'Paramètres manquants')
+  const itemId = requireRouterParam(event, 'itemId', 'Paramètres manquants')
 
-  if (!listId || !itemId) {
-    throw createError({ statusCode: 400, statusMessage: 'Paramètres manquants' })
-  }
+  const body = await readBody<PurchaseRequestBody>(event)
 
-  const body = await readBody<{
-    purchased: boolean
-    purchaserName?: string
-    anonymous?: boolean
-    userId?: string
-  }>(event)
-
-  const updated = await togglePurchaseItem(
+  const updated = await wishlistService.togglePurchaseItem(
     listId,
     itemId,
     body?.purchased ?? true,
@@ -25,7 +25,10 @@ export default defineEventHandler(async (event) => {
   )
 
   if (!updated) {
-    throw createError({ statusCode: 404, statusMessage: 'Cadeau ou liste introuvable' })
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Cadeau ou liste introuvable'
+    })
   }
 
   return updated

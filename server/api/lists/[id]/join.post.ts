@@ -1,27 +1,18 @@
-import { defineEventHandler, getRouterParam, readBody, createError } from 'h3'
-import { addMemberToList } from '../../../utils/db'
+import { defineEventHandler, readBody, createError } from 'h3'
+import { wishlistService } from '../../../services/wishlist.service'
+import { requireRouterParam, validateAndBuildMemberInput } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const id = getRouterParam(event, 'id')
-  if (!id) {
-    throw createError({ statusCode: 400, statusMessage: 'ID manquant' })
-  }
+  const id = requireRouterParam(event, 'id', 'ID manquant')
+  const body = await readBody<Record<string, unknown>>(event)
+  const member = validateAndBuildMemberInput(body)
 
-  const body = await readBody(event)
-  if (!body || !body.name) {
-    throw createError({ statusCode: 400, statusMessage: 'Le prénom ou nom du membre est requis' })
-  }
-
-  const member = {
-    id: body.id || `user-${Date.now()}`,
-    name: body.name.trim(),
-    avatar: body.avatar || undefined,
-    email: body.email || undefined
-  }
-
-  const updatedList = await addMemberToList(id, member)
+  const updatedList = await wishlistService.addMemberToList(id, member)
   if (!updatedList) {
-    throw createError({ statusCode: 404, statusMessage: 'Liste non trouvée' })
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Liste non trouvée'
+    })
   }
 
   return {
