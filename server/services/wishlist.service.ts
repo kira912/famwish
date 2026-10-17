@@ -1,4 +1,11 @@
-import type { Wishlist, WishlistItem, WishlistMember } from '../../types'
+import type {
+  Wishlist,
+  WishlistItem,
+  WishlistMember,
+  PushSubscriptionRecord,
+  PushSubscriptionKeys,
+  ListNotificationEvent
+} from '../../types'
 import { resolveWishlistRepository, type IWishlistRepository } from '../repositories/wishlist.repository'
 
 export interface AddMemberInput {
@@ -20,8 +27,89 @@ export interface TogglePurchaseInput {
   userId?: string
 }
 
+export interface SaveItemActorInput {
+  id?: string
+  name?: string
+}
+
+export interface SubscribePushInput {
+  userId: string
+  userName: string
+  userAvatar?: string
+  endpoint?: string
+  keys?: PushSubscriptionKeys
+  enabled?: boolean
+  notifyOnAdd?: boolean
+  notifyOnReserve?: boolean
+}
+
+export interface MemberNotificationCheck {
+  userId?: string
+  userName?: string
+  notifyOnAdd?: boolean
+  notifyOnReserve?: boolean
+}
+
 export function buildDefaultAvatarUrl(seedName: string): string {
   return `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(seedName.trim())}`
+}
+
+/**
+ * Determines whether a given list member should receive a specific notification,
+ * enforcing actor exclusion and anti-spoiler protection for adult gift reservations.
+ */
+export function shouldMemberReceiveNotification(
+  notification: ListNotificationEvent,
+  member: MemberNotificationCheck,
+  list?: Wishlist | null
+): boolean {
+  if (notification.type === 'item_added' && member.notifyOnAdd === false) {
+    return false
+  }
+  if (notification.type === 'item_reserved' && member.notifyOnReserve === false) {
+    return false
+  }
+
+  const memberId = member.userId?.trim()
+  const memberNameLower = member.userName?.trim().toLowerCase()
+  const actorId = notification.actorId?.trim()
+  const actorNameLower = notification.actorName?.trim().toLowerCase()
+
+  // 1. Do not notify the person who performed the action
+  if (memberId && actorId && memberId === actorId) {
+    return false
+  }
+  if (
+    !notification.isAnonymous &&
+    memberNameLower &&
+    actorNameLower &&
+    memberNameLower === actorNameLower
+  ) {
+    return false
+  }
+
+  // 2. Anti-Spoiler Rule: Never notify an adult recipient when their own gift is reserved
+  if (notification.type === 'item_reserved' && !notification.isChildRecipient) {
+    const recId = notification.recipientId?.trim()
+    const recNameLower = (notification.recipientName || list?.ownerName || '').trim().toLowerCase()
+
+    if (memberId && recId && memberId === recId) {
+      return false
+    }
+    if (memberNameLower && recNameLower && memberNameLower === recNameLower) {
+      return false
+    }
+    if (
+      list &&
+      memberId &&
+      list.ownerId === memberId &&
+      (!notification.recipientName || recNameLower === list.ownerName.trim().toLowerCase())
+    ) {
+      return false
+    }
+  }
+
+  return true
 }
 
 /**
@@ -93,8 +181,23 @@ export function mergeMembersList(
   return result
 }
 
+function isRecipientChildInList(list: Wishlist, recipientName?: string, recipientId?: string): boolean {
+  if (!Array.isArray(list.members)) return false
+  const cleanNameLower = recipientName?.trim().toLowerCase()
+  const cleanId = recipientId?.trim()
+
+  return list.members.some((m) => {
+    if (typeof m !== 'object' || m === null) return false
+    const isChild = Boolean(m.isChild || m.role === 'child')
+    if (!isChild) return false
+    if (cleanId && m.id === cleanId) return true
+    if (cleanNameLower && m.name && m.name.trim().toLowerCase() === cleanNameLower) return true
+    return false
+  })
+}
+
 /**
- * Domain Service orchestrating Wishlist, Member, and Gift Item business rules.
+ * Domain Service orchestrating Wishlist, Member, Gift Item, and Push Notification business rules.
  */
 export class WishlistService {
   constructor(
@@ -274,15 +377,60 @@ export class WishlistService {
     return repo.updateMembers(target.id, updatedMembers, new Date())
   }
 
-  async saveItem(listIdOrCode: string, item: WishlistItem): Promise<WishlistItem | null> {
+  async saveItem(
+    listIdOrCode: string,
+    item: WishlistItem,
+    actor?: SaveItemActorInput
+  ): Promise<WishlistItem | null> {
     const repo = await this.repositoryResolver()
     const target = await repo.findByIdOrCode(listIdOrCode)
     if (!target) return null
 
-    return repo.upsertItem(target.id, {
+    const isUpdate = Array.isArray(target.items) && target.items.some(i => i.id === item.id)
+
+    const saved = await repo.upsertItem(target.id, {
       ...item,
       listId: target.id
     })
+
+    // Trigger Push Notification to list members when a brand new gift is added
+    if (!isUpdate && saved) {
+      const recipientName = (saved.recipientName || target.ownerName || 'un membre').trim()
+      const actorName = (actor?.name || item.addedByName || saved.recipientName || target.ownerName || 'Un membre').trim()
+      const actorId = (actor?.id || item.addedById || saved.recipientId || target.ownerId || '').trim() || undefined
+      const isChildRecipient = isRecipientChildInList(target, recipientName, saved.recipientId)
+
+      const samePerson = actorName.toLowerCase() === recipientName.toLowerCase()
+      const bodyText = samePerson
+        ? `${actorName} a ajouté « ${saved.title} » à ses souhaits.`
+        : `${actorName} a ajouté « ${saved.title} » pour ${recipientName}.`
+
+      const notification: ListNotificationEvent = {
+        id: `notif-add-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        listId: target.id,
+        listTitle: target.title,
+        type: 'item_added',
+        title: `🎁 Nouveau cadeau dans « ${target.title} »`,
+        body: bodyText,
+        itemId: saved.id,
+        itemTitle: saved.title,
+        recipientName,
+        recipientId: saved.recipientId,
+        isChildRecipient,
+        actorId,
+        actorName,
+        isAnonymous: false,
+        createdAt: new Date().toISOString()
+      }
+
+      try {
+        await repo.createNotification(notification)
+      } catch (err) {
+        console.warn('[PushNotifications] Could not persist item_added notification:', err)
+      }
+    }
+
+    return saved
   }
 
   async deleteItem(listIdOrCode: string, itemId: string): Promise<boolean> {
@@ -305,6 +453,11 @@ export class WishlistService {
     const target = await repo.findByIdOrCode(listIdOrCode)
     if (!target) return null
 
+    const existingItem = Array.isArray(target.items)
+      ? target.items.find(i => i.id === itemId)
+      : undefined
+    const wasAlreadyPurchased = Boolean(existingItem?.isPurchased)
+
     const now = new Date()
     const purchasedBy: WishlistItem['purchasedBy'] = purchased
       ? {
@@ -314,12 +467,182 @@ export class WishlistService {
         }
       : undefined
 
-    return repo.updateItemPurchase(target.id, itemId, {
+    const updated = await repo.updateItemPurchase(target.id, itemId, {
       isPurchased: purchased,
       purchasedBy,
       purchasedAt: purchased ? now : null,
       updatedAt: now
     })
+
+    // Trigger Push Notification to list members when a gift is reserved
+    if (purchased && updated && !wasAlreadyPurchased) {
+      const recipientName = (updated.recipientName || target.ownerName || 'un proche').trim()
+      const isChildRecipient = isRecipientChildInList(target, recipientName, updated.recipientId)
+      const cleanPurchaserName = purchaserName?.trim() || 'Un proche'
+      const displayActor = anonymous ? 'Un lutin secret' : cleanPurchaserName
+
+      const bodyText = anonymous
+        ? `🎅 Un lutin secret a réservé « ${updated.title} » pour ${recipientName} !`
+        : `🎁 ${cleanPurchaserName} a réservé « ${updated.title} » pour ${recipientName} !`
+
+      const notification: ListNotificationEvent = {
+        id: `notif-res-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        listId: target.id,
+        listTitle: target.title,
+        type: 'item_reserved',
+        title: `🤫 Cadeau réservé dans « ${target.title} »`,
+        body: bodyText,
+        itemId: updated.id,
+        itemTitle: updated.title,
+        recipientName,
+        recipientId: updated.recipientId || (recipientName.toLowerCase() === target.ownerName.trim().toLowerCase() ? target.ownerId : undefined),
+        isChildRecipient,
+        actorId: userId?.trim() || undefined,
+        actorName: displayActor,
+        isAnonymous: anonymous,
+        createdAt: now.toISOString()
+      }
+
+      try {
+        await repo.createNotification(notification)
+      } catch (err) {
+        console.warn('[PushNotifications] Could not persist item_reserved notification:', err)
+      }
+    }
+
+    return updated
+  }
+
+  async subscribeMemberToPush(
+    listIdOrCode: string,
+    input: SubscribePushInput
+  ): Promise<PushSubscriptionRecord | null> {
+    const repo = await this.repositoryResolver()
+    const target = await repo.findByIdOrCode(listIdOrCode)
+    if (!target) return null
+
+    const cleanUserId = input.userId.trim()
+    const cleanUserName = input.userName.trim() || 'Membre'
+    if (!cleanUserId) return null
+
+    const nowIso = new Date().toISOString()
+    const subRecord: PushSubscriptionRecord = {
+      id: `push-${target.id}-${cleanUserId}`,
+      listId: target.id,
+      userId: cleanUserId,
+      userName: cleanUserName,
+      userAvatar: input.userAvatar || buildDefaultAvatarUrl(cleanUserName),
+      endpoint: input.endpoint,
+      keys: input.keys,
+      enabled: input.enabled ?? true,
+      notifyOnAdd: input.notifyOnAdd ?? true,
+      notifyOnReserve: input.notifyOnReserve ?? true,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    }
+
+    const savedSub = await repo.upsertPushSubscription(subRecord)
+
+    // Mark pushEnabled on the member entry inside the list
+    const currentMembers = Array.isArray(target.members) ? [...target.members] : []
+    const memberObj: WishlistMember = {
+      id: cleanUserId,
+      name: cleanUserName,
+      avatar: subRecord.userAvatar,
+      role: cleanUserId === target.ownerId ? 'owner' : 'member',
+      pushEnabled: savedSub.enabled
+    }
+    const updatedMembers = mergeMembersList(currentMembers, [memberObj])
+    await repo.updateMembers(target.id, updatedMembers, new Date())
+
+    return savedSub
+  }
+
+  async unsubscribeMemberFromPush(
+    listIdOrCode: string,
+    userId: string
+  ): Promise<boolean> {
+    const repo = await this.repositoryResolver()
+    const target = await repo.findByIdOrCode(listIdOrCode)
+    if (!target) return false
+
+    const cleanUserId = userId.trim()
+    if (!cleanUserId) return false
+
+    const deleted = await repo.deletePushSubscription(target.id, cleanUserId)
+
+    // Update member pushEnabled flag to false
+    if (Array.isArray(target.members)) {
+      const updatedMembers = target.members.map((m) => {
+        if (typeof m === 'object' && m !== null && (m.id === cleanUserId || m.name.toLowerCase() === cleanUserId.toLowerCase())) {
+          return { ...m, pushEnabled: false }
+        }
+        return m
+      })
+      await repo.updateMembers(target.id, updatedMembers, new Date())
+    }
+
+    return deleted
+  }
+
+  async getListNotificationsForMember(
+    listIdOrCode: string,
+    viewer: { userId?: string; userName?: string; since?: string } = {}
+  ): Promise<{
+    notifications: ListNotificationEvent[]
+    subscriptions: PushSubscriptionRecord[]
+    mySubscription: PushSubscriptionRecord | null
+  }> {
+    const repo = await this.repositoryResolver()
+    const target = await repo.findByIdOrCode(listIdOrCode)
+    if (!target) {
+      return {
+        notifications: [],
+        subscriptions: [],
+        mySubscription: null
+      }
+    }
+
+    const [allNotifications, allSubscriptions] = await Promise.all([
+      repo.getNotificationsForList(target.id, 40),
+      repo.getPushSubscriptionsForList(target.id)
+    ])
+
+    const viewerId = viewer.userId?.trim()
+    const viewerNameLower = viewer.userName?.trim().toLowerCase()
+
+    const mySubscription =
+      allSubscriptions.find((s) => {
+        if (viewerId && s.userId === viewerId) return true
+        if (viewerNameLower && s.userName.trim().toLowerCase() === viewerNameLower) return true
+        return false
+      }) || null
+
+    const sinceTime = viewer.since ? new Date(viewer.since).getTime() : 0
+
+    const filteredNotifications = allNotifications.filter((notif) => {
+      if (sinceTime > 0 && !Number.isNaN(sinceTime)) {
+        const notifTime = new Date(notif.createdAt).getTime()
+        if (notifTime <= sinceTime) return false
+      }
+
+      return shouldMemberReceiveNotification(
+        notif,
+        {
+          userId: viewerId,
+          userName: viewer.userName,
+          notifyOnAdd: mySubscription ? mySubscription.notifyOnAdd : true,
+          notifyOnReserve: mySubscription ? mySubscription.notifyOnReserve : true
+        },
+        target
+      )
+    })
+
+    return {
+      notifications: filteredNotifications,
+      subscriptions: allSubscriptions.filter(s => s.enabled),
+      mySubscription
+    }
   }
 }
 

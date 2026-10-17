@@ -1,12 +1,27 @@
 import { and, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
-import type { Wishlist, WishlistItem, WishlistMember } from '../../types'
+import type {
+  Wishlist,
+  WishlistItem,
+  WishlistMember,
+  PushSubscriptionRecord,
+  ListNotificationEvent
+} from '../../types'
 import { getReadyDrizzleDb, type DrizzleDatabase } from '../database/client'
-import { wishlistsTable, wishlistItemsTable } from '../database/schema'
+import {
+  wishlistsTable,
+  wishlistItemsTable,
+  pushSubscriptionsTable,
+  listNotificationsTable
+} from '../database/schema'
 import {
   mapRowToWishlist,
   mapRowToWishlistItem,
   mapWishlistToRow,
-  mapWishlistItemToRow
+  mapWishlistItemToRow,
+  mapRowToPushSubscription,
+  mapPushSubscriptionToRow,
+  mapRowToListNotification,
+  mapListNotificationToRow
 } from '../database/mappers'
 
 export interface UserListFilterCriteria {
@@ -35,6 +50,11 @@ export interface IWishlistRepository {
   upsertItem(listId: string, item: WishlistItem): Promise<WishlistItem>
   deleteItem(listId: string, itemId: string): Promise<boolean>
   updateItemPurchase(listId: string, itemId: string, update: ItemPurchaseUpdate): Promise<WishlistItem | null>
+  upsertPushSubscription(sub: PushSubscriptionRecord): Promise<PushSubscriptionRecord>
+  getPushSubscriptionsForList(listId: string): Promise<PushSubscriptionRecord[]>
+  deletePushSubscription(listId: string, userId: string): Promise<boolean>
+  createNotification(notification: ListNotificationEvent): Promise<ListNotificationEvent>
+  getNotificationsForList(listId: string, limit?: number): Promise<ListNotificationEvent[]>
 }
 
 /**
@@ -289,6 +309,85 @@ export class DrizzleWishlistRepository implements IWishlistRepository {
     if (!updatedRow) return null
     return mapRowToWishlistItem(updatedRow)
   }
+
+  async upsertPushSubscription(sub: PushSubscriptionRecord): Promise<PushSubscriptionRecord> {
+    const now = new Date()
+    const rowPayload = mapPushSubscriptionToRow(sub, now)
+
+    const [savedRow] = await this.db
+      .insert(pushSubscriptionsTable)
+      .values(rowPayload)
+      .onConflictDoUpdate({
+        target: pushSubscriptionsTable.id,
+        set: {
+          userName: rowPayload.userName,
+          userAvatar: rowPayload.userAvatar,
+          endpoint: rowPayload.endpoint,
+          keys: rowPayload.keys,
+          enabled: rowPayload.enabled,
+          notifyOnAdd: rowPayload.notifyOnAdd,
+          notifyOnReserve: rowPayload.notifyOnReserve,
+          updatedAt: now
+        }
+      })
+      .returning()
+
+    return mapRowToPushSubscription(savedRow)
+  }
+
+  async getPushSubscriptionsForList(listId: string): Promise<PushSubscriptionRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(pushSubscriptionsTable)
+      .where(eq(pushSubscriptionsTable.listId, listId))
+      .orderBy(desc(pushSubscriptionsTable.updatedAt))
+
+    return rows.map(mapRowToPushSubscription)
+  }
+
+  async deletePushSubscription(listId: string, userId: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(pushSubscriptionsTable)
+      .where(
+        and(
+          eq(pushSubscriptionsTable.listId, listId),
+          eq(pushSubscriptionsTable.userId, userId)
+        )
+      )
+      .returning({ id: pushSubscriptionsTable.id })
+
+    return deleted.length > 0
+  }
+
+  async createNotification(notification: ListNotificationEvent): Promise<ListNotificationEvent> {
+    const now = new Date()
+    const rowPayload = mapListNotificationToRow(notification, now)
+
+    const [savedRow] = await this.db
+      .insert(listNotificationsTable)
+      .values(rowPayload)
+      .onConflictDoUpdate({
+        target: listNotificationsTable.id,
+        set: {
+          title: rowPayload.title,
+          body: rowPayload.body
+        }
+      })
+      .returning()
+
+    return mapRowToListNotification(savedRow)
+  }
+
+  async getNotificationsForList(listId: string, limit: number = 30): Promise<ListNotificationEvent[]> {
+    const rows = await this.db
+      .select()
+      .from(listNotificationsTable)
+      .where(eq(listNotificationsTable.listId, listId))
+      .orderBy(desc(listNotificationsTable.createdAt))
+      .limit(limit)
+
+    return rows.map(mapRowToListNotification)
+  }
 }
 
 /**
@@ -296,6 +395,8 @@ export class DrizzleWishlistRepository implements IWishlistRepository {
  */
 export class InMemoryWishlistRepository implements IWishlistRepository {
   private store: Wishlist[] = []
+  private pushSubscriptions: PushSubscriptionRecord[] = []
+  private notifications: ListNotificationEvent[] = []
 
   async findForUser(criteria: UserListFilterCriteria): Promise<Wishlist[]> {
     const { userId, joinedIds, joinedInviteCodes } = criteria
@@ -365,6 +466,8 @@ export class InMemoryWishlistRepository implements IWishlistRepository {
 
   async deleteList(id: string): Promise<boolean> {
     const index = this.store.findIndex(l => l.id === id)
+    this.pushSubscriptions = this.pushSubscriptions.filter(s => s.listId !== id)
+    this.notifications = this.notifications.filter(n => n.listId !== id)
     if (index < 0) return false
     this.store.splice(index, 1)
     return true
@@ -443,6 +546,58 @@ export class InMemoryWishlistRepository implements IWishlistRepository {
     target.updatedAt = nowIso
 
     return item
+  }
+
+  async upsertPushSubscription(sub: PushSubscriptionRecord): Promise<PushSubscriptionRecord> {
+    const nowIso = new Date().toISOString()
+    const normalized: PushSubscriptionRecord = {
+      ...sub,
+      updatedAt: nowIso,
+      createdAt: sub.createdAt || nowIso
+    }
+
+    const idx = this.pushSubscriptions.findIndex(
+      s => s.id === sub.id || (s.listId === sub.listId && s.userId === sub.userId)
+    )
+    if (idx >= 0) {
+      this.pushSubscriptions[idx] = {
+        ...this.pushSubscriptions[idx],
+        ...normalized,
+        id: this.pushSubscriptions[idx].id
+      }
+      return this.pushSubscriptions[idx]
+    }
+
+    this.pushSubscriptions.unshift(normalized)
+    return normalized
+  }
+
+  async getPushSubscriptionsForList(listId: string): Promise<PushSubscriptionRecord[]> {
+    return this.pushSubscriptions.filter(s => s.listId === listId)
+  }
+
+  async deletePushSubscription(listId: string, userId: string): Promise<boolean> {
+    const lowerUser = userId.trim().toLowerCase()
+    const before = this.pushSubscriptions.length
+    this.pushSubscriptions = this.pushSubscriptions.filter(
+      s => !(s.listId === listId && (s.userId === userId || s.userId.toLowerCase() === lowerUser || s.userName.toLowerCase() === lowerUser))
+    )
+    return this.pushSubscriptions.length < before
+  }
+
+  async createNotification(notification: ListNotificationEvent): Promise<ListNotificationEvent> {
+    const normalized: ListNotificationEvent = {
+      ...notification,
+      createdAt: notification.createdAt || new Date().toISOString()
+    }
+    this.notifications.unshift(normalized)
+    return normalized
+  }
+
+  async getNotificationsForList(listId: string, limit: number = 30): Promise<ListNotificationEvent[]> {
+    return this.notifications
+      .filter(n => n.listId === listId)
+      .slice(0, limit)
   }
 }
 

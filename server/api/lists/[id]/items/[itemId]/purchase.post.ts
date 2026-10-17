@@ -7,6 +7,10 @@ interface PurchaseRequestBody {
   purchaserName?: string
   anonymous?: boolean
   userId?: string
+  user?: {
+    id?: string
+    name?: string
+  }
 }
 
 export default defineEventHandler(async (event) => {
@@ -15,13 +19,16 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody<PurchaseRequestBody>(event)
 
+  const purchaserName = body?.purchaserName || body?.user?.name
+  const userId = body?.userId || body?.user?.id
+
   const updated = await wishlistService.togglePurchaseItem(
     listId,
     itemId,
     body?.purchased ?? true,
-    body?.purchaserName,
+    purchaserName,
     body?.anonymous ?? true,
-    body?.userId
+    userId
   )
 
   if (!updated) {

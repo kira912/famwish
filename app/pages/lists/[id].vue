@@ -18,11 +18,15 @@ import {
   Baby,
   UserCheck,
   UserMinus,
+  Bell,
+  BellRing,
+  BellOff,
   X
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
 import { useToast } from '~/composables/useToast'
+import { usePushNotifications } from '~/composables/usePushNotifications'
 import type { Wishlist, WishlistItem } from '~/types'
 
 const route = useRoute()
@@ -39,6 +43,18 @@ const {
 } = useWishlists()
 const { currentUser, joinListId } = useAuth()
 const toast = useToast()
+const {
+  isSubscribing,
+  fetchListNotifications,
+  subscribeToListPush,
+  updatePushPreferences,
+  unsubscribeFromListPush,
+  markAllNotificationsAsSeen,
+  getMySubscription,
+  getListSubscribers,
+  getListNotifications,
+  getUnreadCount
+} = usePushNotifications()
 
 const openShareModal = inject<(list: Wishlist) => void>('openShareModal')
 
@@ -47,6 +63,8 @@ const listId = computed(() => route.params.id as string)
 const list = computed(() => {
   return getList(listId.value)
 })
+
+const resolvedListId = computed(() => list.value?.id || listId.value)
 
 const isOwner = computed(() => {
   return list.value?.ownerId === currentUser.value?.id
@@ -66,7 +84,74 @@ const itemToEdit = ref<WishlistItem | null>(null)
 const isEditListOpen = ref(false)
 const isInviteModalOpen = ref(false)
 const isChildModalOpen = ref(false)
+const isPushModalOpen = ref(false)
 const isCodeCopied = ref(false)
+
+// Push Notifications state for this list
+const myPushSubscription = computed(() => getMySubscription(resolvedListId.value).value)
+const listPushSubscribers = computed(() => getListSubscribers(resolvedListId.value).value)
+const listNotifications = computed(() => getListNotifications(resolvedListId.value).value)
+const unreadNotificationsCount = computed(() => getUnreadCount(resolvedListId.value).value)
+const isPushEnabled = computed(() => Boolean(myPushSubscription.value?.enabled))
+
+const pushPrefs = reactive({
+  notifyOnAdd: true,
+  notifyOnReserve: true
+})
+
+watch(myPushSubscription, (sub) => {
+  if (sub) {
+    pushPrefs.notifyOnAdd = sub.notifyOnAdd
+    pushPrefs.notifyOnReserve = sub.notifyOnReserve
+  }
+}, { immediate: true })
+
+function openPushModal() {
+  isPushModalOpen.value = true
+  if (resolvedListId.value) {
+    markAllNotificationsAsSeen(resolvedListId.value)
+  }
+}
+
+async function handleTogglePushSubscription() {
+  if (!list.value) return
+  if (isPushEnabled.value) {
+    await unsubscribeFromListPush(list.value.id)
+    await fetchListById(list.value.id)
+  } else {
+    const sub = await subscribeToListPush(list.value.id, {
+      notifyOnAdd: pushPrefs.notifyOnAdd,
+      notifyOnReserve: pushPrefs.notifyOnReserve,
+      memberNameFallback: currentUser.value?.name || list.value.ownerName
+    })
+    if (sub) {
+      await fetchListById(list.value.id)
+    }
+  }
+}
+
+async function handleChangePushPref(key: 'notifyOnAdd' | 'notifyOnReserve', value: boolean) {
+  pushPrefs[key] = value
+  if (list.value && isPushEnabled.value) {
+    await updatePushPreferences(list.value.id, {
+      notifyOnAdd: pushPrefs.notifyOnAdd,
+      notifyOnReserve: pushPrefs.notifyOnReserve
+    })
+  }
+}
+
+function formatNotificationTime(isoDate: string): string {
+  try {
+    const d = new Date(isoDate)
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000)
+    if (diffSec < 60) return 'À l\'instant'
+    if (diffSec < 3600) return `Il y a ${Math.floor(diffSec / 60)} min`
+    if (diffSec < 86400) return `Il y a ${Math.floor(diffSec / 3600)} h`
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
 
 // Item filters
 const filterStatus = ref<'all' | 'favorites' | 'available' | 'purchased'>('all')
@@ -83,6 +168,7 @@ export interface RecipientEntry {
   parentId?: string
   parentName?: string
   age?: number
+  pushEnabled?: boolean
   count: number
   availableCount: number
 }
@@ -95,7 +181,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
     rawName: unknown,
     avatar?: string,
     role?: 'owner' | 'member' | 'child',
-    meta?: { id?: string; isChild?: boolean; parentId?: string; parentName?: string; age?: number }
+    meta?: { id?: string; isChild?: boolean; parentId?: string; parentName?: string; age?: number; pushEnabled?: boolean }
   ) => {
     if (typeof rawName !== 'string') return null
     const cleanName = rawName.trim()
@@ -113,6 +199,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
         parentId: meta?.parentId,
         parentName: meta?.parentName,
         age: meta?.age,
+        pushEnabled: meta?.pushEnabled,
         count: 0,
         availableCount: 0
       })
@@ -120,6 +207,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
       const existing = map.get(key)!
       if (avatar && !existing.avatar) existing.avatar = avatar
       if (meta?.id && !existing.id) existing.id = meta.id
+      if (meta?.pushEnabled !== undefined) existing.pushEnabled = meta.pushEnabled
       if (role === 'owner') existing.role = 'owner'
       if (isChild) {
         existing.role = 'child'
@@ -145,7 +233,8 @@ const recipientsList = computed<RecipientEntry[]>(() => {
           isChild,
           parentId: m.parentId,
           parentName: m.parentName,
-          age: m.age !== undefined && m.age !== null && !isNaN(Number(m.age)) ? Number(m.age) : undefined
+          age: m.age !== undefined && m.age !== null && !isNaN(Number(m.age)) ? Number(m.age) : undefined,
+          pushEnabled: m.pushEnabled
         })
       } else if (typeof m === 'string') {
         addOrGetRecipient(m, undefined, 'member')
@@ -366,30 +455,38 @@ if (import.meta.server || !list.value) {
   await fetchListById(listId.value)
 }
 
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 async function refreshListAndSyncMember() {
   const fetched = await fetchListById(listId.value)
   const activeList = fetched || list.value
-  if (activeList && currentUser.value) {
-    joinListId(activeList.id)
-    joinListId(activeList.inviteCode)
-    const alreadyInMembers = Array.isArray(activeList.members) && activeList.members.some((m: any) => {
-      if (typeof m === 'object' && m !== null) {
-        return (
-          (m.id && m.id === currentUser.value?.id) ||
-          (m.name && String(m.name).trim().toLowerCase() === currentUser.value?.name.trim().toLowerCase())
-        )
+  if (activeList) {
+    if (currentUser.value) {
+      joinListId(activeList.id)
+      joinListId(activeList.inviteCode)
+      const alreadyInMembers = Array.isArray(activeList.members) && activeList.members.some((m: any) => {
+        if (typeof m === 'object' && m !== null) {
+          return (
+            (m.id && m.id === currentUser.value?.id) ||
+            (m.name && String(m.name).trim().toLowerCase() === currentUser.value?.name.trim().toLowerCase())
+          )
+        }
+        return false
+      })
+      if (!alreadyInMembers) {
+        await syncMemberOnServer(activeList.id, currentUser.value)
       }
-      return false
-    })
-    if (!alreadyInMembers) {
-      await syncMemberOnServer(activeList.id, currentUser.value)
     }
+    await fetchListNotifications(activeList.id)
   }
 }
 
-function handleWindowFocus() {
+async function handleWindowFocus() {
   if (listId.value) {
-    fetchListById(listId.value)
+    await fetchListById(listId.value)
+    if (resolvedListId.value) {
+      await fetchListNotifications(resolvedListId.value)
+    }
   }
 }
 
@@ -397,12 +494,25 @@ onMounted(async () => {
   await refreshListAndSyncMember()
   if (import.meta.client) {
     window.addEventListener('focus', handleWindowFocus)
+    pollTimer = setInterval(async () => {
+      if (resolvedListId.value) {
+        const prevCount = listNotifications.value.length
+        await fetchListNotifications(resolvedListId.value)
+        if (listNotifications.value.length !== prevCount) {
+          await fetchListById(resolvedListId.value)
+        }
+      }
+    }, 5000)
   }
 })
 
 onBeforeUnmount(() => {
   if (import.meta.client) {
     window.removeEventListener('focus', handleWindowFocus)
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
   }
 })
 
@@ -411,6 +521,7 @@ watch(currentUser, async (newUser) => {
     joinListId(list.value.id)
     joinListId(list.value.inviteCode)
     await syncMemberOnServer(list.value.id, newUser)
+    await fetchListNotifications(list.value.id)
   }
 })
 
@@ -536,8 +647,32 @@ async function copyInviteCode() {
         <span>Toutes les listes</span>
       </NuxtLink>
 
-      <!-- Action buttons: Add Child, Share & Edit -->
+      <!-- Action buttons: Push Notifications, Share & Edit -->
       <div class="flex items-center gap-2">
+        <!-- Push Notifications Button -->
+        <button
+          @click="openPushModal"
+          type="button"
+          class="relative flex items-center gap-1.5 py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all shadow-subtle active:scale-98 cursor-pointer"
+          :class="isPushEnabled
+            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 shadow-sm'
+            : (isChristmasList
+                ? 'border border-amber-300/70 dark:border-amber-600/40 bg-white/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
+                : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-semibold')"
+          :title="isPushEnabled ? 'Gérer les notifications push de la liste' : 'Activer les notifications push pour cette liste'"
+          aria-label="Notifications push de la liste"
+        >
+          <BellRing v-if="isPushEnabled" class="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+          <Bell v-else class="w-3.5 h-3.5 text-rose-500" />
+          <span class="hidden sm:inline">{{ isPushEnabled ? 'Notifications activées 🔔' : 'Notifications push' }}</span>
+          <span
+            v-if="unreadNotificationsCount > 0"
+            class="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-rose-600 text-white shadow-sm"
+          >
+            {{ unreadNotificationsCount }}
+          </span>
+        </button>
+
         <button
           @click="handleShare"
           type="button"
@@ -682,6 +817,7 @@ async function copyInviteCode() {
                     👶<template v-if="member.age"> {{ member.age }}a</template>
                   </span>
                   <span v-else-if="isMemberListOwner(member)" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
+                  <span v-if="member.pushEnabled" class="text-[10px]" title="Notifications push activées">🔔</span>
                 </button>
                 <button
                   v-if="canRemoveMember(member)"
@@ -696,21 +832,40 @@ async function copyInviteCode() {
               </div>
             </div>
 
-            <!-- Invite Code pill -->
-            <div class="flex items-center gap-2 text-xs text-white/95">
-              <span class="font-medium">{{ isChristmasList ? 'Code secret de la hotte :' : 'Code d\'invitation :' }}</span>
+            <!-- Invite Code & Push Quick Toggle Row -->
+            <div class="flex flex-wrap items-center gap-3 text-xs text-white/95">
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{{ isChristmasList ? 'Code secret de la hotte :' : 'Code d\'invitation :' }}</span>
+                <button
+                  @click="copyInviteCode"
+                  type="button"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono font-bold tracking-wider transition-all"
+                  :class="isChristmasList
+                    ? 'bg-black/45 hover:bg-black/60 text-amber-200 border border-amber-300/40 shadow-sm'
+                    : 'bg-black/30 hover:bg-black/40 text-amber-200 border border-white/10'"
+                  title="Cliquer pour copier le code"
+                >
+                  <span>{{ list.inviteCode }}</span>
+                  <Check v-if="isCodeCopied" class="w-3 h-3 text-emerald-400" />
+                  <Copy v-else class="w-3 h-3 text-amber-200" />
+                </button>
+              </div>
+
+              <!-- Quick 1-click Push Notification Pill for List Members -->
               <button
-                @click="copyInviteCode"
+                @click="handleTogglePushSubscription"
+                :disabled="isSubscribing"
                 type="button"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono font-bold tracking-wider transition-all"
-                :class="isChristmasList
-                  ? 'bg-black/45 hover:bg-black/60 text-amber-200 border border-amber-300/40 shadow-sm'
-                  : 'bg-black/30 hover:bg-black/40 text-amber-200 border border-white/10'"
-                title="Cliquer pour copier le code"
+                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer border"
+                :class="isPushEnabled
+                  ? 'bg-emerald-600/90 hover:bg-emerald-700 text-white border-emerald-400/60 shadow-sm'
+                  : 'bg-black/35 hover:bg-black/55 text-amber-100 border-white/20'"
               >
-                <span>{{ list.inviteCode }}</span>
-                <Check v-if="isCodeCopied" class="w-3 h-3 text-emerald-400" />
-                <Copy v-else class="w-3 h-3 text-amber-200" />
+                <BellRing v-if="isPushEnabled" class="w-3.5 h-3.5 text-amber-200" />
+                <Bell v-else class="w-3.5 h-3.5 text-amber-300" />
+                <span>
+                  {{ isPushEnabled ? 'Alertes push activées 🔔' : 'Activer les alertes push (ajout & réservation)' }}
+                </span>
               </button>
             </div>
           </div>
@@ -1047,7 +1202,7 @@ async function copyInviteCode() {
             @click="handleRemoveMember(selectedMemberObj)"
             class="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             :title="`Supprimer ${selectedMemberObj.name} de la liste`"
-            :aria-label="`Supprimer ${selectedMemberObj.name} de la liste`"
+            :aria-label="selectedMemberObj.isChild || selectedMemberObj.role === 'child' ? 'Retirer l\'enfant' : `Supprimer ${selectedMemberObj.name} de la liste`"
           >
             <Trash2 class="w-3.5 h-3.5" />
             <span>Retirer de la liste</span>
@@ -1238,6 +1393,210 @@ async function copyInviteCode() {
         </span>
       </button>
     </div>
+
+    <!-- Push Notifications Management & Activity Feed Modal -->
+    <Transition name="modal">
+      <div
+        v-if="isPushModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="push-modal-title"
+      >
+        <div
+          class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+          @click="isPushModalOpen = false"
+        />
+
+        <div
+          class="relative w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-elevated p-5 sm:p-7 z-10 my-auto max-h-[92vh] flex flex-col"
+        >
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0 mb-4">
+            <div class="flex items-center gap-3">
+              <div
+                class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
+                :class="isPushEnabled
+                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'"
+              >
+                <BellRing v-if="isPushEnabled" class="w-5 h-5" />
+                <Bell v-else class="w-5 h-5" />
+              </div>
+              <div>
+                <h3 id="push-modal-title" class="text-lg font-bold font-display text-slate-900 dark:text-white">
+                  Notifications Push de la liste
+                </h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                  Alertes d'ajout et de réservation pour les membres • Anti-spoiler actif
+                </p>
+              </div>
+            </div>
+
+            <button
+              @click="isPushModalOpen = false"
+              type="button"
+              aria-label="Fermer"
+              class="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div class="space-y-4 overflow-y-auto pr-1 flex-1">
+            <!-- Subscription Status & Main CTA -->
+            <div
+              class="p-4 rounded-2xl border space-y-3"
+              :class="isPushEnabled
+                ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60'
+                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <span
+                    class="text-xs font-extrabold block"
+                    :class="isPushEnabled ? 'text-emerald-900 dark:text-emerald-200' : 'text-slate-900 dark:text-white'"
+                  >
+                    {{ isPushEnabled ? '🔔 Notifications Push activées pour vous' : '🔕 Notifications Push désactivées' }}
+                  </span>
+                  <span class="text-[11px] text-slate-600 dark:text-slate-400">
+                    {{ isPushEnabled
+                      ? 'Vous recevez les alertes en temps réel sur cet appareil.'
+                      : 'Activez les alertes pour savoir quand un proche ajoute ou réserve un cadeau.'
+                    }}
+                  </span>
+                </div>
+
+                <button
+                  @click="handleTogglePushSubscription"
+                  :disabled="isSubscribing"
+                  type="button"
+                  class="px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 shadow-sm cursor-pointer"
+                  :class="isPushEnabled
+                    ? 'bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white'"
+                >
+                  {{ isSubscribing
+                    ? 'Chargement...'
+                    : (isPushEnabled ? 'Désactiver' : 'Activer les notifications')
+                  }}
+                </button>
+              </div>
+
+              <!-- Event Type Preferences -->
+              <div class="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 space-y-2">
+                <label class="flex items-start gap-2.5 cursor-pointer text-xs">
+                  <input
+                    type="checkbox"
+                    :checked="pushPrefs.notifyOnAdd"
+                    @change="handleChangePushPref('notifyOnAdd', ($event.target as HTMLInputElement).checked)"
+                    class="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <span class="font-bold text-slate-900 dark:text-white block">
+                      🎁 Quand quelqu'un ajoute un cadeau
+                    </span>
+                    <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                      Notifie les membres de la liste dès qu'une nouvelle idée cadeau est ajoutée.
+                    </span>
+                  </div>
+                </label>
+
+                <label class="flex items-start gap-2.5 cursor-pointer text-xs">
+                  <input
+                    type="checkbox"
+                    :checked="pushPrefs.notifyOnReserve"
+                    @change="handleChangePushPref('notifyOnReserve', ($event.target as HTMLInputElement).checked)"
+                    class="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <span class="font-bold text-slate-900 dark:text-white block">
+                      🤫 Quand quelqu'un réserve un cadeau (Anti-spoiler)
+                    </span>
+                    <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                      Notifie les autres membres pour éviter les doublons, sans jamais alerter le bénéficiaire du cadeau !
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Subscribed Members List -->
+            <div v-if="listPushSubscribers.length > 0" class="space-y-1.5">
+              <span class="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                Membres abonnés aux alertes push ({{ listPushSubscribers.length }})
+              </span>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="sub in listPushSubscribers"
+                  :key="sub.id"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold"
+                >
+                  <img
+                    v-if="sub.userAvatar"
+                    :src="sub.userAvatar"
+                    :alt="sub.userName"
+                    class="w-4 h-4 rounded-full object-cover"
+                  />
+                  <span>{{ sub.userName }}</span>
+                  <span class="text-[10px]">🔔</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- Recent Push Notifications Feed (Filtered with Anti-Spoiler) -->
+            <div class="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Historique des notifications ({{ listNotifications.length }})
+                </span>
+                <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <Lock class="w-3 h-3" />
+                  <span>Surprises protégées</span>
+                </span>
+              </div>
+
+              <div v-if="listNotifications.length > 0" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                <div
+                  v-for="notif in listNotifications"
+                  :key="notif.id"
+                  class="p-3 rounded-2xl border bg-slate-50/80 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700/80 flex items-start gap-3 text-xs"
+                >
+                  <div
+                    class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-base"
+                    :class="notif.type === 'item_added'
+                      ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600'
+                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600'"
+                  >
+                    {{ notif.type === 'item_added' ? '🎁' : '🤫' }}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="font-bold text-slate-900 dark:text-white truncate">
+                        {{ notif.type === 'item_added' ? 'Nouveau cadeau ajouté' : 'Cadeau réservé' }}
+                      </span>
+                      <span class="text-[10px] text-slate-400 shrink-0">
+                        {{ formatNotificationTime(notif.createdAt) }}
+                      </span>
+                    </div>
+                    <p class="text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                      {{ notif.body }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-else
+                class="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400"
+              >
+                Aucune notification pour le moment sur cette liste.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Child Management Modal (Add / Edit Child attached to a Parent) -->
     <Transition name="modal">

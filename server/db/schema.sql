@@ -45,6 +45,42 @@ CREATE TABLE IF NOT EXISTS wishlist_items (
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id VARCHAR(255) PRIMARY KEY,
+  list_id VARCHAR(255) NOT NULL REFERENCES wishlists(id) ON DELETE CASCADE,
+  user_id VARCHAR(255) NOT NULL,
+  user_name VARCHAR(255) NOT NULL,
+  user_avatar TEXT,
+  endpoint TEXT,
+  keys JSONB,
+  enabled BOOLEAN DEFAULT TRUE NOT NULL,
+  notify_on_add BOOLEAN DEFAULT TRUE NOT NULL,
+  notify_on_reserve BOOLEAN DEFAULT TRUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS list_notifications (
+  id VARCHAR(255) PRIMARY KEY,
+  list_id VARCHAR(255) NOT NULL REFERENCES wishlists(id) ON DELETE CASCADE,
+  list_title VARCHAR(255) NOT NULL,
+  type VARCHAR(50) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  item_id VARCHAR(255) NOT NULL,
+  item_title VARCHAR(255) NOT NULL,
+  recipient_name VARCHAR(255),
+  recipient_id VARCHAR(255),
+  is_child_recipient BOOLEAN DEFAULT FALSE NOT NULL,
+  actor_id VARCHAR(255),
+  actor_name VARCHAR(255),
+  is_anonymous BOOLEAN DEFAULT FALSE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_wishlist_items_list_id ON wishlist_items(list_id);
 CREATE INDEX IF NOT EXISTS idx_wishlists_invite_code ON wishlists(invite_code);
 CREATE INDEX IF NOT EXISTS idx_wishlists_owner_id ON wishlists(owner_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_list_id ON push_subscriptions(list_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_list_notifications_list_id ON list_notifications(list_id);

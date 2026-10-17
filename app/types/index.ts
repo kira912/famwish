@@ -15,6 +15,10 @@ export interface WishlistItem {
   recipientId?: string
   recipientAvatar?: string
 
+  // Actor who added the item
+  addedById?: string
+  addedByName?: string
+
   // Custom details: quantity, color, note/comment box
   quantity?: number
   colorOrVariant?: string
@@ -44,6 +48,47 @@ export interface WishlistMember {
   parentId?: string
   parentName?: string
   age?: number
+  pushEnabled?: boolean
+}
+
+export interface PushSubscriptionKeys {
+  p256dh?: string
+  auth?: string
+}
+
+export interface PushSubscriptionRecord {
+  id: string
+  listId: string
+  userId: string
+  userName: string
+  userAvatar?: string
+  endpoint?: string
+  keys?: PushSubscriptionKeys
+  enabled: boolean
+  notifyOnAdd: boolean
+  notifyOnReserve: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ListNotificationType = 'item_added' | 'item_reserved'
+
+export interface ListNotificationEvent {
+  id: string
+  listId: string
+  listTitle: string
+  type: ListNotificationType
+  title: string
+  body: string
+  itemId: string
+  itemTitle: string
+  recipientName?: string
+  recipientId?: string
+  isChildRecipient?: boolean
+  actorId?: string
+  actorName?: string
+  isAnonymous?: boolean
+  createdAt: string
 }
 
 export interface Wishlist {

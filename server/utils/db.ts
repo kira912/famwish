@@ -1,12 +1,20 @@
-import type { Wishlist, WishlistItem } from '../../types'
+import type {
+  Wishlist,
+  WishlistItem,
+  PushSubscriptionRecord,
+  ListNotificationEvent
+} from '../../types'
 import {
   wishlistService,
   mergeMembersList,
-  type AddMemberInput
+  shouldMemberReceiveNotification,
+  type AddMemberInput,
+  type SaveItemActorInput,
+  type SubscribePushInput
 } from '../services/wishlist.service'
 
-export { mergeMembersList, wishlistService }
-export type { AddMemberInput }
+export { mergeMembersList, shouldMemberReceiveNotification, wishlistService }
+export type { AddMemberInput, SaveItemActorInput, SubscribePushInput }
 
 /**
  * Fetch wishlists for a specific user (owned lists + member lists + joined lists).
@@ -59,8 +67,12 @@ export async function removeMemberFromList(
 /**
  * Create or update a gift item inside a wishlist.
  */
-export async function saveItem(listIdOrCode: string, item: WishlistItem): Promise<WishlistItem | null> {
-  return wishlistService.saveItem(listIdOrCode, item)
+export async function saveItem(
+  listIdOrCode: string,
+  item: WishlistItem,
+  actor?: SaveItemActorInput
+): Promise<WishlistItem | null> {
+  return wishlistService.saveItem(listIdOrCode, item, actor)
 }
 
 /**
@@ -89,4 +101,38 @@ export async function togglePurchaseItem(
     anonymous,
     userId
   )
+}
+
+/**
+ * Subscribe a list member to push notifications for gift additions and reservations.
+ */
+export async function subscribeMemberToPush(
+  listIdOrCode: string,
+  input: SubscribePushInput
+): Promise<PushSubscriptionRecord | null> {
+  return wishlistService.subscribeMemberToPush(listIdOrCode, input)
+}
+
+/**
+ * Unsubscribe a list member from push notifications.
+ */
+export async function unsubscribeMemberFromPush(
+  listIdOrCode: string,
+  userId: string
+): Promise<boolean> {
+  return wishlistService.unsubscribeMemberFromPush(listIdOrCode, userId)
+}
+
+/**
+ * Retrieve filtered notifications and push subscription status for a list member.
+ */
+export async function getListNotificationsForMember(
+  listIdOrCode: string,
+  viewer: { userId?: string; userName?: string; since?: string } = {}
+): Promise<{
+  notifications: ListNotificationEvent[]
+  subscriptions: PushSubscriptionRecord[]
+  mySubscription: PushSubscriptionRecord | null
+}> {
+  return wishlistService.getListNotificationsForMember(listIdOrCode, viewer)
 }

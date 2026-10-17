@@ -8,15 +8,28 @@ import {
   saveItem,
   deleteItem,
   togglePurchaseItem,
-  deleteList
+  deleteList,
+  subscribeMemberToPush,
+  unsubscribeMemberFromPush,
+  getListNotificationsForMember,
+  shouldMemberReceiveNotification
 } from '../../server/utils/db'
 import {
   mapRowToWishlist,
   mapRowToWishlistItem,
   mapWishlistToRow,
-  mapWishlistItemToRow
+  mapWishlistItemToRow,
+  mapPushSubscriptionToRow,
+  mapRowToPushSubscription,
+  mapListNotificationToRow,
+  mapRowToListNotification
 } from '../../server/database/mappers'
-import { wishlistsTable, wishlistItemsTable } from '../../server/database/schema'
+import {
+  wishlistsTable,
+  wishlistItemsTable,
+  pushSubscriptionsTable,
+  listNotificationsTable
+} from '../../server/database/schema'
 import { InMemoryWishlistRepository } from '../../server/repositories/wishlist.repository'
 import { WishlistService } from '../../server/services/wishlist.service'
 import type { Wishlist, WishlistItem } from '../../types'
@@ -326,9 +339,159 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     expect(listAfterDelete?.items).toHaveLength(0)
   })
 
+  it('envoie des notifications push aux membres lors d’un ajout ou d’une réservation de cadeau en respectant l’anti-spoiler', async () => {
+    await saveList({
+      id: testListId,
+      ownerId: 'user-sophie',
+      ownerName: 'Sophie',
+      title: 'Noël en Famille',
+      category: 'christmas',
+      inviteCode: testInviteCode,
+      members: [],
+      items: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    // Ajouter Tonton Marc, Manon et l'enfant Lucas (rattaché à Sophie)
+    await addMemberToList(testListId, { id: 'user-marc', name: 'Tonton Marc' })
+    await addMemberToList(testListId, { id: 'user-manon', name: 'Manon' })
+    await addMemberToList(testListId, {
+      id: 'child-lucas',
+      name: 'Lucas',
+      role: 'child',
+      isChild: true,
+      parentId: 'user-sophie',
+      parentName: 'Sophie',
+      age: 7
+    })
+
+    // Sophie, Tonton Marc et Manon s'abonnent aux notifications push
+    const subSophie = await subscribeMemberToPush(testListId, {
+      userId: 'user-sophie',
+      userName: 'Sophie',
+      notifyOnAdd: true,
+      notifyOnReserve: true
+    })
+    const subMarc = await subscribeMemberToPush(testListId, {
+      userId: 'user-marc',
+      userName: 'Tonton Marc',
+      notifyOnAdd: true,
+      notifyOnReserve: true
+    })
+    const subManon = await subscribeMemberToPush(testListId, {
+      userId: 'user-manon',
+      userName: 'Manon',
+      notifyOnAdd: true,
+      notifyOnReserve: true
+    })
+
+    expect(subSophie?.enabled).toBe(true)
+    expect(subMarc?.enabled).toBe(true)
+    expect(subManon?.enabled).toBe(true)
+
+    // 1. Sophie ajoute un cadeau pour elle-même ("Pull en cachemire")
+    await saveItem(
+      testListId,
+      {
+        id: 'item-sophie-pull',
+        listId: testListId,
+        title: 'Pull en cachemire',
+        recipientName: 'Sophie',
+        recipientId: 'user-sophie',
+        isPurchased: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      { id: 'user-sophie', name: 'Sophie' }
+    )
+
+    // Tonton Marc reçoit la notification d'ajout, mais Sophie (qui a fait l'action) ne reçoit pas sa propre notification
+    const marcFeedAfterAdd = await getListNotificationsForMember(testListId, {
+      userId: 'user-marc',
+      userName: 'Tonton Marc'
+    })
+    expect(marcFeedAfterAdd.notifications).toHaveLength(1)
+    expect(marcFeedAfterAdd.notifications[0].type).toBe('item_added')
+    expect(marcFeedAfterAdd.notifications[0].body).toContain('Pull en cachemire')
+
+    const sophieFeedAfterOwnAdd = await getListNotificationsForMember(testListId, {
+      userId: 'user-sophie',
+      userName: 'Sophie'
+    })
+    expect(sophieFeedAfterOwnAdd.notifications).toHaveLength(0)
+
+    // 2. Tonton Marc réserve le cadeau de Sophie en secret
+    await togglePurchaseItem(
+      testListId,
+      'item-sophie-pull',
+      true,
+      'Tonton Marc',
+      true,
+      'user-marc'
+    )
+
+    // Manon (autre membre) reçoit la notification de réservation secrète
+    const manonFeedAfterReserve = await getListNotificationsForMember(testListId, {
+      userId: 'user-manon',
+      userName: 'Manon'
+    })
+    expect(manonFeedAfterReserve.notifications.some(n => n.type === 'item_reserved')).toBe(true)
+    const reserveNotifForManon = manonFeedAfterReserve.notifications.find(n => n.type === 'item_reserved')!
+    expect(reserveNotifForManon.body).toContain('Un lutin secret')
+    expect(reserveNotifForManon.body).toContain('Pull en cachemire')
+
+    // ANTI-SPOILER CRITIQUE : Sophie (bénéficiaire adulte) ne doit JAMAIS recevoir la notification que son cadeau est réservé !
+    const sophieFeedAfterReserve = await getListNotificationsForMember(testListId, {
+      userId: 'user-sophie',
+      userName: 'Sophie'
+    })
+    expect(sophieFeedAfterReserve.notifications.some(n => n.type === 'item_reserved')).toBe(false)
+
+    // 3. Sophie ajoute un cadeau pour son enfant Lucas ("Train en bois"), puis Tonton Marc le réserve
+    await saveItem(
+      testListId,
+      {
+        id: 'item-lucas-train',
+        listId: testListId,
+        title: 'Train en bois',
+        recipientName: 'Lucas',
+        recipientId: 'child-lucas',
+        isPurchased: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      { id: 'user-sophie', name: 'Sophie' }
+    )
+
+    await togglePurchaseItem(
+      testListId,
+      'item-lucas-train',
+      true,
+      'Tonton Marc',
+      false,
+      'user-marc'
+    )
+
+    // Comme Lucas est un enfant sans compte, Sophie (son parent) reçoit bien la notification que le cadeau de Lucas a été réservé par Tonton Marc !
+    const sophieFeedAfterChildReserve = await getListNotificationsForMember(testListId, {
+      userId: 'user-sophie',
+      userName: 'Sophie'
+    })
+    expect(sophieFeedAfterChildReserve.notifications).toHaveLength(1)
+    expect(sophieFeedAfterChildReserve.notifications[0].type).toBe('item_reserved')
+    expect(sophieFeedAfterChildReserve.notifications[0].body).toContain('Tonton Marc a réservé « Train en bois » pour Lucas')
+
+    // 4. Désabonnement de Tonton Marc
+    const unsubbed = await unsubscribeMemberFromPush(testListId, 'user-marc')
+    expect(unsubbed).toBe(true)
+  })
+
   it('valide les mappers bidirectionnels Drizzle ORM <-> Entités Domaine et l’injection de Repository', async () => {
     expect(wishlistsTable).toBeDefined()
     expect(wishlistItemsTable).toBeDefined()
+    expect(pushSubscriptionsTable).toBeDefined()
+    expect(listNotificationsTable).toBeDefined()
 
     const now = new Date('2026-12-01T12:00:00.000Z')
     const domainList: Wishlist = {
@@ -375,6 +538,37 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     const roundTripList = mapRowToWishlist(dbRow as any, [roundTripItem])
     expect(roundTripList.id).toBe('list-orm-1')
     expect(roundTripList.items).toHaveLength(1)
+
+    // Test mappers PushSubscription & ListNotification
+    const subRow = mapPushSubscriptionToRow({
+      id: 'push-1',
+      listId: 'list-orm-1',
+      userId: 'owner-1',
+      userName: 'Camille',
+      enabled: true,
+      notifyOnAdd: true,
+      notifyOnReserve: true,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }, now)
+    const roundTripSub = mapRowToPushSubscription(subRow as any)
+    expect(roundTripSub.userName).toBe('Camille')
+    expect(roundTripSub.enabled).toBe(true)
+
+    const notifRow = mapListNotificationToRow({
+      id: 'notif-1',
+      listId: 'list-orm-1',
+      listTitle: 'Noël ORM',
+      type: 'item_added',
+      title: 'Nouveau cadeau',
+      body: 'Camille a ajouté un livre',
+      itemId: 'item-orm-1',
+      itemTitle: 'Livre Architecture Logicielle',
+      createdAt: now.toISOString()
+    }, now)
+    const roundTripNotif = mapRowToListNotification(notifRow as any)
+    expect(roundTripNotif.type).toBe('item_added')
+    expect(shouldMemberReceiveNotification(roundTripNotif, { userId: 'other-user', userName: 'Paul' })).toBe(true)
 
     // Test de l'isolation par injection de dépendance dans WishlistService
     const isolatedRepo = new InMemoryWishlistRepository()

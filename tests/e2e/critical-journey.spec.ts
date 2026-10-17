@@ -68,8 +68,12 @@ test.describe('Parcours critique E2E FamWish', () => {
     // CRITIQUE : Vérifier que le nom de "Tonton Marc" apparaît sur la liste (dans l'en-tête ET dans les onglets des membres)
     await expect(guestPage.getByText('Membres (2) :')).toBeVisible()
     await expect(guestPage.locator('section[aria-labelledby="list-detail-title"]')).toContainText('Tonton Marc')
-    const marcMemberTab = guestPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i })
+    const marcMemberTab = guestPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i }).first()
     await expect(marcMemberTab).toBeVisible()
+
+    // Tonton Marc active les notifications push sur la liste
+    await guestPage.getByRole('button', { name: /Activer les alertes push/i }).click()
+    await expect(guestPage.getByRole('button', { name: /Alertes push activées/i })).toBeVisible()
 
     // Vérifier que Tonton Marc voit aussi le bouton d'ajout de cadeau bien visible dans l'en-tête
     await expect(
@@ -94,8 +98,21 @@ test.describe('Parcours critique E2E FamWish', () => {
     await expect(ownerPage.getByText('Membres (2) :')).toBeVisible()
     await expect(ownerPage.locator('section[aria-labelledby="list-detail-title"]')).toContainText('Tonton Marc')
     await expect(
-      ownerPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i })
+      ownerPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i }).first()
     ).toBeVisible()
+
+    // Sophie ajoute un deuxième cadeau -> Tonton Marc (abonné aux notifications push) reçoit la notification !
+    await ownerPage.locator('section[aria-labelledby="list-detail-title"]').getByRole('button', { name: /Ajouter un cadeau/i }).click()
+    const addModal2 = ownerPage.getByRole('dialog')
+    await addModal2.getByPlaceholder(/Ex: Lego Star Wars/i).fill('Coffret Thés de Noël')
+    await addModal2.getByRole('button', { name: /Ajouter à la liste/i }).click()
+
+    await guestPage.reload()
+    await guestPage.getByRole('button', { name: /Notifications push de la liste/i }).click()
+    const pushModal = guestPage.getByRole('dialog')
+    await expect(pushModal).toBeVisible()
+    await expect(pushModal).toContainText('Coffret Thés de Noël')
+    await pushModal.getByRole('button', { name: 'Fermer' }).click()
 
     // Vérifier aussi sur l'accueil que la carte de liste (ListCard) affiche bien Tonton Marc et 2 membres
     await ownerPage.goto('/')
@@ -168,7 +185,7 @@ test.describe('Parcours critique E2E FamWish', () => {
     await expect(relativePage).toHaveURL(listUrl)
 
     // Tonton Marc filtre sur Lucas et réserve son cadeau
-    await relativePage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).click()
+    await relativePage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).first().click()
     await expect(relativePage.getByRole('heading', { name: 'Château Lego Harry Potter' })).toBeVisible()
     await relativePage.getByRole('button', { name: /Mettre dans ma hotte pour Noël|Réserver ce cadeau/i }).click()
     await relativePage.getByRole('button', { name: /Confirmer la réservation/i }).click()
@@ -194,7 +211,7 @@ test.describe('Parcours critique E2E FamWish', () => {
 
     // 6. Retour côté Sophie (Parent de Lucas) : comme Lucas n'a pas de compte, Sophie voit que le cadeau de Lucas est réservé pour éviter les doublons
     await parentPage.reload()
-    await parentPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).click()
+    await parentPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Lucas/i }).first().click()
     await expect(parentPage.getByText(/Déjà réservé|Déjà dans la hotte/i).first()).toBeVisible()
 
     // 7. Suppression d'Emma par Tonton Marc

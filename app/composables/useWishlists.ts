@@ -241,6 +241,9 @@ export function useWishlists() {
     const recipient = itemPayload.recipientName || currentUser.value?.name || list.ownerName || 'Moi'
     const isCurrentUserRecipient = currentUser.value?.name && recipient.toLowerCase() === currentUser.value.name.toLowerCase()
 
+    const actorId = currentUser.value?.id || list.ownerId
+    const actorName = currentUser.value?.name || list.ownerName
+
     const newItem: WishlistItem = {
       id: itemPayload.id || `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       listId: list.id,
@@ -248,6 +251,8 @@ export function useWishlists() {
       recipientName: recipient,
       recipientId: itemPayload.recipientId || (isCurrentUserRecipient ? currentUser.value?.id : undefined),
       recipientAvatar: itemPayload.recipientAvatar || (isCurrentUserRecipient ? currentUser.value?.avatar : undefined),
+      addedById: actorId,
+      addedByName: actorName,
       description: itemPayload.description,
       url: itemPayload.url,
       imageUrl: itemPayload.imageUrl,
@@ -266,7 +271,13 @@ export function useWishlists() {
     try {
       const saved = await $fetch<WishlistItem>(`/api/lists/${list.id}/items`, {
         method: 'POST',
-        body: newItem
+        body: {
+          ...newItem,
+          actor: {
+            id: actorId,
+            name: actorName
+          }
+        }
       })
       const idx = list.items.findIndex(i => i.id === saved.id)
       if (idx >= 0) {
@@ -372,6 +383,8 @@ export function useWishlists() {
         body: {
           purchased,
           anonymous,
+          purchaserName: currentUser.value?.name || 'Un proche',
+          userId: currentUser.value?.id,
           user: currentUser.value ? { id: currentUser.value.id, name: currentUser.value.name } : undefined
         }
       })

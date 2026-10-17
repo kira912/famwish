@@ -10,7 +10,13 @@ import {
   index
 } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
-import type { WishlistCategory, WishlistMember, WishlistItem } from '../../types'
+import type {
+  WishlistCategory,
+  WishlistMember,
+  WishlistItem,
+  PushSubscriptionKeys,
+  ListNotificationType
+} from '../../types'
 
 export type PurchasedByRecord = NonNullable<WishlistItem['purchasedBy']>
 export type WishlistPriority = NonNullable<WishlistItem['priority']>
@@ -72,8 +78,60 @@ export const wishlistItemsTable = pgTable(
   ]
 )
 
+export const pushSubscriptionsTable = pgTable(
+  'push_subscriptions',
+  {
+    id: varchar('id', { length: 255 }).primaryKey(),
+    listId: varchar('list_id', { length: 255 })
+      .notNull()
+      .references(() => wishlistsTable.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 255 }).notNull(),
+    userName: varchar('user_name', { length: 255 }).notNull(),
+    userAvatar: text('user_avatar'),
+    endpoint: text('endpoint'),
+    keys: jsonb('keys').$type<PushSubscriptionKeys | null>(),
+    enabled: boolean('enabled').default(true).notNull(),
+    notifyOnAdd: boolean('notify_on_add').default(true).notNull(),
+    notifyOnReserve: boolean('notify_on_reserve').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).defaultNow().notNull()
+  },
+  (table) => [
+    index('idx_push_subscriptions_list_id').on(table.listId),
+    index('idx_push_subscriptions_user_id').on(table.userId)
+  ]
+)
+
+export const listNotificationsTable = pgTable(
+  'list_notifications',
+  {
+    id: varchar('id', { length: 255 }).primaryKey(),
+    listId: varchar('list_id', { length: 255 })
+      .notNull()
+      .references(() => wishlistsTable.id, { onDelete: 'cascade' }),
+    listTitle: varchar('list_title', { length: 255 }).notNull(),
+    type: varchar('type', { length: 50 }).$type<ListNotificationType>().notNull(),
+    title: varchar('title', { length: 255 }).notNull(),
+    body: text('body').notNull(),
+    itemId: varchar('item_id', { length: 255 }).notNull(),
+    itemTitle: varchar('item_title', { length: 255 }).notNull(),
+    recipientName: varchar('recipient_name', { length: 255 }),
+    recipientId: varchar('recipient_id', { length: 255 }),
+    isChildRecipient: boolean('is_child_recipient').default(false).notNull(),
+    actorId: varchar('actor_id', { length: 255 }),
+    actorName: varchar('actor_name', { length: 255 }),
+    isAnonymous: boolean('is_anonymous').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).defaultNow().notNull()
+  },
+  (table) => [
+    index('idx_list_notifications_list_id').on(table.listId)
+  ]
+)
+
 export const wishlistsRelations = relations(wishlistsTable, ({ many }) => ({
-  items: many(wishlistItemsTable)
+  items: many(wishlistItemsTable),
+  pushSubscriptions: many(pushSubscriptionsTable),
+  notifications: many(listNotificationsTable)
 }))
 
 export const wishlistItemsRelations = relations(wishlistItemsTable, ({ one }) => ({
@@ -83,7 +141,25 @@ export const wishlistItemsRelations = relations(wishlistItemsTable, ({ one }) =>
   })
 }))
 
+export const pushSubscriptionsRelations = relations(pushSubscriptionsTable, ({ one }) => ({
+  wishlist: one(wishlistsTable, {
+    fields: [pushSubscriptionsTable.listId],
+    references: [wishlistsTable.id]
+  })
+}))
+
+export const listNotificationsRelations = relations(listNotificationsTable, ({ one }) => ({
+  wishlist: one(wishlistsTable, {
+    fields: [listNotificationsTable.listId],
+    references: [wishlistsTable.id]
+  })
+}))
+
 export type WishlistRow = typeof wishlistsTable.$inferSelect
 export type NewWishlistRow = typeof wishlistsTable.$inferInsert
 export type WishlistItemRow = typeof wishlistItemsTable.$inferSelect
 export type NewWishlistItemRow = typeof wishlistItemsTable.$inferInsert
+export type PushSubscriptionRow = typeof pushSubscriptionsTable.$inferSelect
+export type NewPushSubscriptionRow = typeof pushSubscriptionsTable.$inferInsert
+export type ListNotificationRow = typeof listNotificationsTable.$inferSelect
+export type NewListNotificationRow = typeof listNotificationsTable.$inferInsert
