@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -13,7 +13,8 @@ import {
   Edit2,
   Trash2,
   Copy,
-  Check
+  Check,
+  Gift
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
 import { useAuth } from '~/composables/useAuth'
@@ -22,7 +23,7 @@ import type { Wishlist, WishlistItem } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
-const { getList, fetchListById, deleteList, deleteItem } = useWishlists()
+const { getList, fetchListById, deleteList, deleteItem, syncMemberOnServer } = useWishlists()
 const { currentUser, joinListId } = useAuth()
 const toast = useToast()
 
@@ -60,21 +61,52 @@ const itemSearch = ref('')
 
 const recipientsList = computed(() => {
   if (!list.value) return []
-  const map = new Map<string, { name: string; count: number; availableCount: number }>()
+  const map = new Map<string, { key: string; name: string; avatar?: string; role?: string; count: number; availableCount: number }>()
+
+  const addOrGetRecipient = (rawName: unknown, avatar?: string, role?: string) => {
+    if (typeof rawName !== 'string') return null
+    const cleanName = rawName.trim()
+    if (!cleanName || cleanName.startsWith('user-') || cleanName.startsWith('google-')) return null
+    const key = cleanName.toLowerCase()
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        name: cleanName,
+        avatar: avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
+        role,
+        count: 0,
+        availableCount: 0
+      })
+    } else {
+      const existing = map.get(key)!
+      if (avatar && !existing.avatar) existing.avatar = avatar
+      if (role === 'owner') existing.role = 'owner'
+    }
+    return map.get(key)!
+  }
 
   const owner = list.value.ownerName || 'Moi'
-  map.set(owner, { name: owner, count: 0, availableCount: 0 })
+  addOrGetRecipient(owner, list.value.ownerAvatar, 'owner')
+
+  if (Array.isArray(list.value.members)) {
+    list.value.members.forEach((m: any) => {
+      if (typeof m === 'object' && m !== null && m.name) {
+        addOrGetRecipient(m.name, m.avatar, m.role || 'member')
+      } else if (typeof m === 'string') {
+        addOrGetRecipient(m, undefined, 'member')
+      }
+    })
+  }
 
   list.value.items.forEach(i => {
     const rawRec = typeof i.recipientName === 'string' ? i.recipientName.trim() : ''
     const recName = rawRec || owner
-    if (!map.has(recName)) {
-      map.set(recName, { name: recName, count: 0, availableCount: 0 })
-    }
-    const rec = map.get(recName)!
-    rec.count += 1
-    if (!i.isPurchased) {
-      rec.availableCount += 1
+    const rec = addOrGetRecipient(recName, i.recipientAvatar, 'member')
+    if (rec) {
+      rec.count += 1
+      if (!i.isPurchased) {
+        rec.availableCount += 1
+      }
     }
   })
 
@@ -85,13 +117,51 @@ if (import.meta.server || !list.value) {
   await fetchListById(listId.value)
 }
 
-onMounted(async () => {
-  if (!list.value) {
-    await fetchListById(listId.value)
+async function refreshListAndSyncMember() {
+  const fetched = await fetchListById(listId.value)
+  const activeList = fetched || list.value
+  if (activeList && currentUser.value) {
+    joinListId(activeList.id)
+    joinListId(activeList.inviteCode)
+    const alreadyInMembers = Array.isArray(activeList.members) && activeList.members.some((m: any) => {
+      if (typeof m === 'object' && m !== null) {
+        return (
+          (m.id && m.id === currentUser.value?.id) ||
+          (m.name && String(m.name).trim().toLowerCase() === currentUser.value?.name.trim().toLowerCase())
+        )
+      }
+      return false
+    })
+    if (!alreadyInMembers) {
+      await syncMemberOnServer(activeList.id, currentUser.value)
+    }
   }
-  if (list.value && currentUser.value) {
+}
+
+function handleWindowFocus() {
+  if (listId.value) {
+    fetchListById(listId.value)
+  }
+}
+
+onMounted(async () => {
+  await refreshListAndSyncMember()
+  if (import.meta.client) {
+    window.addEventListener('focus', handleWindowFocus)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (import.meta.client) {
+    window.removeEventListener('focus', handleWindowFocus)
+  }
+})
+
+watch(currentUser, async (newUser) => {
+  if (newUser && list.value) {
     joinListId(list.value.id)
     joinListId(list.value.inviteCode)
+    await syncMemberOnServer(list.value.id, newUser)
   }
 })
 
@@ -148,10 +218,10 @@ function openAddItem(recipientName?: string) {
   itemToEdit.value = null
   if (typeof recipientName === 'string' && recipientName && recipientName !== 'all') {
     defaultAddRecipient.value = recipientName
-  } else if (currentUser.value?.name) {
-    defaultAddRecipient.value = currentUser.value.name
   } else if (typeof selectedRecipient.value === 'string' && selectedRecipient.value !== 'all') {
     defaultAddRecipient.value = selectedRecipient.value
+  } else if (currentUser.value?.name) {
+    defaultAddRecipient.value = currentUser.value.name
   } else {
     defaultAddRecipient.value = list.value?.ownerName || ''
   }
@@ -327,44 +397,79 @@ async function copyInviteCode() {
             {{ list.description }}
           </p>
 
-          <!-- Invite Code pill -->
-          <div class="pt-1 flex items-center gap-2 text-xs text-white/95">
-            <span class="font-medium">{{ isChristmasList ? 'Code secret de la hotte :' : 'Code d\'invitation :' }}</span>
-            <button
-              @click="copyInviteCode"
-              type="button"
-              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono font-bold tracking-wider transition-all"
-              :class="isChristmasList
-                ? 'bg-black/45 hover:bg-black/60 text-amber-200 border border-amber-300/40 shadow-sm'
-                : 'bg-black/30 hover:bg-black/40 text-amber-200 border border-white/10'"
-              title="Cliquer pour copier le code"
-            >
-              <span>{{ list.inviteCode }}</span>
-              <Check v-if="isCodeCopied" class="w-3 h-3 text-emerald-400" />
-              <Copy v-else class="w-3 h-3 text-amber-200" />
-            </button>
+          <!-- Joined Members & Invite Code Row -->
+          <div class="pt-1.5 space-y-2.5">
+            <!-- Joined Members Badges -->
+            <div v-if="recipientsList.length > 0" class="flex flex-wrap items-center gap-1.5">
+              <span class="text-xs text-white/90 font-semibold flex items-center gap-1 mr-1">
+                <Users class="w-3.5 h-3.5 text-amber-300" />
+                <span>Membres ({{ recipientsList.length }}) :</span>
+              </span>
+              <button
+                v-for="member in recipientsList"
+                :key="member.key"
+                type="button"
+                @click="selectedRecipient = selectedRecipient === member.name ? 'all' : member.name"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all border backdrop-blur-md"
+                :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
+                  ? 'bg-white text-slate-900 border-white shadow-sm scale-105'
+                  : 'bg-black/35 hover:bg-black/50 text-white border-white/20'"
+                :title="`Filtrer les cadeaux de ${member.name}`"
+              >
+                <img
+                  v-if="member.avatar"
+                  :src="member.avatar"
+                  :alt="member.name"
+                  class="w-4 h-4 rounded-full object-cover bg-white/20"
+                />
+                <span>{{ member.name }}</span>
+                <span v-if="member.role === 'owner'" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
+              </button>
+            </div>
+
+            <!-- Invite Code pill -->
+            <div class="flex items-center gap-2 text-xs text-white/95">
+              <span class="font-medium">{{ isChristmasList ? 'Code secret de la hotte :' : 'Code d\'invitation :' }}</span>
+              <button
+                @click="copyInviteCode"
+                type="button"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono font-bold tracking-wider transition-all"
+                :class="isChristmasList
+                  ? 'bg-black/45 hover:bg-black/60 text-amber-200 border border-amber-300/40 shadow-sm'
+                  : 'bg-black/30 hover:bg-black/40 text-amber-200 border border-white/10'"
+                title="Cliquer pour copier le code"
+              >
+                <span>{{ list.inviteCode }}</span>
+                <Check v-if="isCodeCopied" class="w-3 h-3 text-emerald-400" />
+                <Copy v-else class="w-3 h-3 text-amber-200" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <!-- Right Side CTA: Add Gift if Owner -->
-        <div class="shrink-0 flex flex-col items-start md:items-end gap-3 relative z-10">
+        <!-- Right Side CTA: Prominent Add Gift Button for Everyone -->
+        <div class="shrink-0 flex flex-col items-stretch sm:items-start md:items-end gap-3 relative z-10">
           <button
-            v-if="isOwner"
             @click="openAddItem()"
             type="button"
-            class="flex items-center gap-2 font-extrabold text-xs sm:text-sm shadow-sm transition-all active:scale-98"
+            class="group flex items-center justify-center gap-3 font-extrabold text-sm sm:text-base transition-all duration-200 hover:scale-[1.03] active:scale-98 cursor-pointer"
             :class="isChristmasList
-              ? 'gold-gradient-btn py-3 px-5 sm:py-3.5 sm:px-7 rounded-2xl shadow-[0_4px_20px_rgba(250,204,21,0.4)]'
-              : 'py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-white text-rose-700 hover:bg-rose-50 font-bold'"
+              ? 'gold-gradient-btn py-3.5 px-6 sm:py-4 sm:px-7 rounded-2xl shadow-[0_8px_30px_rgba(250,204,21,0.55)] ring-4 ring-amber-300/35'
+              : 'py-3.5 px-6 sm:py-4 sm:px-7 rounded-2xl bg-white text-rose-600 hover:bg-rose-50 shadow-[0_10px_30px_rgba(0,0,0,0.28)] ring-4 ring-white/30'"
           >
-            <Plus class="w-4 h-4 stroke-[2.5]" />
-            <span>{{ isChristmasList ? 'Ajouter un cadeau sous le sapin 🎁' : 'Ajouter une envie de cadeau' }}</span>
+            <span
+              class="w-8 h-8 rounded-xl flex items-center justify-center transition-transform group-hover:rotate-90"
+              :class="isChristmasList ? 'bg-amber-950/15 text-amber-950' : 'bg-rose-600 text-white shadow-sm'"
+            >
+              <Plus class="w-5 h-5 stroke-[3]" />
+            </span>
+            <span>{{ isChristmasList ? 'Ajouter un cadeau sous le sapin 🎁' : 'Ajouter un cadeau à la liste ✨' }}</span>
           </button>
 
           <!-- Non-owner Secret Notice -->
           <div
-            v-else
-            class="p-4 rounded-2xl backdrop-blur-md text-xs max-w-xs space-y-1.5 shadow-lg border"
+            v-if="!isOwner"
+            class="p-3.5 rounded-2xl backdrop-blur-md text-xs max-w-xs space-y-1 shadow-lg border"
             :class="isChristmasList
               ? 'bg-black/50 border-amber-300/40'
               : 'bg-black/40 border-white/10'"
@@ -412,27 +517,35 @@ async function copyInviteCode() {
     </div>
 
     <!-- Multi-person Family Members Tabs Navigation -->
-    <section aria-labelledby="members-section-title" class="space-y-2.5 relative z-10">
-      <div class="flex items-center justify-between">
+    <section aria-labelledby="members-section-title" class="space-y-3 relative z-10">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2">
           <span v-if="isChristmasList" class="text-base">🎅</span>
           <Users v-else class="w-4 h-4 text-rose-500" />
           <h2
             id="members-section-title"
-            class="text-xs font-bold uppercase tracking-wider"
+            class="text-xs sm:text-sm font-bold uppercase tracking-wider"
             :class="isChristmasList ? 'text-amber-950 dark:text-amber-200 font-extrabold' : 'text-slate-800 dark:text-slate-200'"
           >
-            {{ isChristmasList ? 'Hotte de Noël par membre de la famille' : 'Cadeaux par membre de la famille' }}
+            {{ isChristmasList ? 'Hotte de Noël par membre de la famille' : 'Membres & Cadeaux de la liste' }}
           </h2>
         </div>
+
         <button
           @click="openAddItem()"
           type="button"
-          class="inline-flex items-center gap-1 text-xs font-bold hover:underline transition-colors"
-          :class="isChristmasList ? 'text-amber-800 dark:text-amber-300' : 'text-rose-600 dark:text-rose-400 font-semibold'"
+          class="inline-flex items-center gap-2 py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-extrabold transition-all shadow-md hover:scale-[1.02] active:scale-98 cursor-pointer"
+          :class="isChristmasList
+            ? 'gold-gradient-btn shadow-[0_4px_16px_rgba(234,179,8,0.4)]'
+            : 'bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white shadow-[0_4px_16px_rgba(225,29,72,0.35)]'"
         >
-          <Plus class="w-3.5 h-3.5" />
-          <span>{{ isChristmasList ? 'Ajouter une idée pour la hotte' : 'Ajouter une idée pour un proche' }}</span>
+          <Plus class="w-4 h-4 stroke-[2.5]" />
+          <span>
+            {{ selectedRecipient !== 'all'
+              ? `Ajouter un cadeau pour ${selectedRecipient}`
+              : (isChristmasList ? 'Ajouter un cadeau à la hotte 🎁' : 'Ajouter un cadeau 🎁')
+            }}
+          </span>
         </button>
       </div>
 
@@ -453,7 +566,7 @@ async function copyInviteCode() {
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800')
           ]"
         >
-          <span>{{ isChristmasList ? '👨‍👩‍👧‍👦 Toute la famille' : '👨‍👩‍👧‍👦 Toute la famille' }}</span>
+          <span>👨‍👩‍👧‍👦 Toute la famille</span>
           <span
             class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
             :class="selectedRecipient === 'all'
@@ -467,12 +580,12 @@ async function copyInviteCode() {
         <!-- Individual Family Member Buttons -->
         <button
           v-for="member in recipientsList"
-          :key="member.name"
+          :key="member.key"
           type="button"
           @click="selectedRecipient = member.name"
-          class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 border shadow-sm active:scale-98"
+          class="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 border shadow-sm active:scale-98"
           :class="[
-            selectedRecipient === member.name
+            selectedRecipient.toLowerCase() === member.name.toLowerCase()
               ? (isChristmasList
                   ? 'gold-gradient-btn border-amber-400 font-extrabold'
                   : 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white')
@@ -481,10 +594,17 @@ async function copyInviteCode() {
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800')
           ]"
         >
-          <span>{{ isChristmasList ? `🎁 ${member.name}` : `🎁 ${member.name}` }}</span>
+          <img
+            v-if="member.avatar"
+            :src="member.avatar"
+            :alt="member.name"
+            class="w-4 h-4 rounded-full object-cover ring-1 ring-black/10"
+          />
+          <span v-else>🎁</span>
+          <span>{{ member.name }}</span>
           <span
             class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
-            :class="selectedRecipient === member.name
+            :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
               ? (isChristmasList ? 'bg-amber-950/20 text-amber-950' : 'bg-white/20 text-white dark:bg-black/20 dark:text-slate-900')
               : (isChristmasList ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400')"
           >
@@ -606,6 +726,48 @@ async function copyInviteCode() {
       v-if="filteredItems.length > 0"
       class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 relative z-10"
     >
+      <!-- Prominent Add Gift Card inside the grid -->
+      <button
+        @click="openAddItem()"
+        type="button"
+        class="group rounded-3xl border-2 border-dashed p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[260px] transition-all duration-200 hover:scale-[1.01] active:scale-98 cursor-pointer"
+        :class="isChristmasList
+          ? 'border-amber-400/80 dark:border-amber-500/60 bg-gradient-to-b from-amber-50/70 via-white/90 to-amber-100/50 dark:from-xmas-950/40 dark:via-slate-900/90 dark:to-xmas-950/40 hover:border-amber-500 hover:shadow-[0_12px_30px_rgba(234,179,8,0.22)]'
+          : 'border-rose-300 dark:border-rose-800/80 bg-gradient-to-b from-rose-50/50 via-white to-rose-50/30 dark:from-rose-950/20 dark:via-slate-900 dark:to-rose-950/10 hover:border-rose-500 dark:hover:border-rose-500 hover:shadow-[0_12px_30px_rgba(225,29,72,0.15)]'"
+      >
+        <div
+          class="w-16 h-16 rounded-2xl flex items-center justify-center shadow-md transition-transform duration-200 group-hover:scale-110"
+          :class="isChristmasList
+            ? 'gold-gradient-btn text-amber-950'
+            : 'bg-gradient-to-br from-rose-500 to-pink-600 text-white shadow-rose-500/30'"
+        >
+          <Plus class="w-8 h-8 stroke-[2.5]" />
+        </div>
+        <div class="space-y-1">
+          <span
+            class="block text-base font-extrabold font-display"
+            :class="isChristmasList ? 'text-amber-950 dark:text-amber-100' : 'text-slate-900 dark:text-white'"
+          >
+            {{ selectedRecipient !== 'all' ? `Ajouter un cadeau pour ${selectedRecipient}` : 'Ajouter un nouveau cadeau' }}
+          </span>
+          <span
+            class="block text-xs max-w-[220px] mx-auto leading-relaxed"
+            :class="isChristmasList ? 'text-amber-800/80 dark:text-amber-300/80' : 'text-slate-500 dark:text-slate-400'"
+          >
+            Collez un lien web (Amazon, Fnac...) ou écrivez une idée libre
+          </span>
+        </div>
+        <span
+          class="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold shadow-sm transition-colors"
+          :class="isChristmasList
+            ? 'bg-amber-950 text-amber-200 group-hover:bg-amber-900'
+            : 'bg-rose-600 text-white group-hover:bg-rose-700'"
+        >
+          <Gift class="w-3.5 h-3.5" />
+          <span>+ Ajouter maintenant</span>
+        </span>
+      </button>
+
       <GiftCard
         v-for="item in filteredItems"
         :key="item.id"
@@ -621,53 +783,57 @@ async function copyInviteCode() {
     <!-- Empty Gifts State -->
     <div
       v-else
-      class="rounded-3xl border p-8 sm:p-12 text-center max-w-md mx-auto space-y-3 relative z-10"
+      class="rounded-3xl border p-8 sm:p-12 text-center max-w-md mx-auto space-y-4 relative z-10"
       :class="isChristmasList
         ? 'border-2 border-amber-300/80 dark:border-amber-600/50 bg-gradient-to-b from-white via-amber-50/40 to-amber-100/30 dark:from-slate-900 dark:via-xmas-950/40 dark:to-slate-900 shadow-[0_10px_30px_rgba(234,179,8,0.15)]'
-        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'"
+        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-card'"
     >
       <div
-        class="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mx-auto shadow-sm"
+        class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mx-auto shadow-sm"
         :class="isChristmasList
           ? 'bg-gradient-to-br from-amber-100 to-amber-200 dark:from-xmas-900 dark:to-amber-950/60 border border-amber-300 text-amber-950'
-          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'"
+          : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'"
       >
-        {{ isChristmasList ? '🎄' : '✨' }}
+        {{ isChristmasList ? '🎄' : '🎁' }}
       </div>
       <div>
         <h3
-          class="text-base font-extrabold font-display"
+          class="text-lg font-extrabold font-display"
           :class="isChristmasList ? 'text-amber-950 dark:text-amber-100' : 'text-slate-900 dark:text-white'"
         >
-          {{ isChristmasList
-            ? (isOwner ? 'Votre hotte de Noël est encore vide 🎅' : 'Aucun cadeau de Noël trouvé sous le sapin')
-            : (isOwner ? 'Votre liste est encore vide' : 'Aucun cadeau trouvé')
+          {{ selectedRecipient !== 'all'
+            ? `Aucun cadeau pour ${selectedRecipient} pour le moment`
+            : (isChristmasList
+                ? (isOwner ? 'Votre hotte de Noël est encore vide 🎅' : 'Aucun cadeau de Noël trouvé sous le sapin')
+                : (isOwner ? 'Votre liste est encore vide' : 'Aucun cadeau dans cette liste'))
           }}
         </h3>
         <p
           class="text-xs mt-1.5 max-w-xs mx-auto leading-relaxed"
           :class="isChristmasList ? 'text-amber-900/80 dark:text-amber-300/80 font-medium' : 'text-slate-500 dark:text-slate-400'"
         >
-          {{ isOwner
-            ? (isChristmasList
-                ? 'Remplissez votre liste au Père Noël en ajoutant vos premiers souhaits et liens vers vos cadeaux rêvés !'
-                : 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !')
-            : 'Aucun cadeau ne correspond aux filtres actuels.'
+          {{ selectedRecipient !== 'all'
+            ? `Ajoutez une première idée de cadeau pour ${selectedRecipient} en 1 clic !`
+            : 'Ajoutez vos premières envies de cadeaux en collant des liens ou en écrivant vos idées !'
           }}
         </p>
       </div>
 
       <button
-        v-if="isOwner"
         @click="openAddItem()"
         type="button"
-        class="py-2.5 px-5 rounded-xl text-xs font-extrabold shadow-sm transition-all active:scale-98 inline-flex items-center gap-2"
+        class="py-3.5 px-6 rounded-2xl text-sm font-extrabold shadow-lg transition-all hover:scale-[1.02] active:scale-98 inline-flex items-center gap-2.5 cursor-pointer"
         :class="isChristmasList
-          ? 'gold-gradient-btn shadow-[0_4px_16px_rgba(250,204,21,0.4)]'
-          : 'bg-rose-600 hover:bg-rose-700 text-white font-semibold'"
+          ? 'gold-gradient-btn shadow-[0_6px_20px_rgba(250,204,21,0.45)]'
+          : 'bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white shadow-[0_6px_20px_rgba(225,29,72,0.35)]'"
       >
-        <Plus class="w-4 h-4 stroke-[2.5]" />
-        <span>{{ isChristmasList ? 'Ajouter un cadeau sous le sapin ✨' : 'Ajouter une envie de cadeau' }}</span>
+        <Plus class="w-5 h-5 stroke-[2.5]" />
+        <span>
+          {{ selectedRecipient !== 'all'
+            ? `Ajouter un cadeau pour ${selectedRecipient} 🎁`
+            : (isChristmasList ? 'Ajouter un cadeau sous le sapin ✨' : 'Ajouter une envie de cadeau 🎁')
+          }}
+        </span>
       </button>
     </div>
 

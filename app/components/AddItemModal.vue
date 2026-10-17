@@ -7,7 +7,6 @@ import {
   Sparkles,
   Loader2,
   Palette,
-  MessageSquare,
   Heart,
   Image as ImageIcon,
   User,
@@ -41,21 +40,37 @@ function ensureString(val: unknown): string {
   return ''
 }
 
-// Existing recipients in this list
+// Existing recipients in this list (owner + joined members + item recipients)
 const existingRecipients = computed(() => {
-  const set = new Set<string>()
-  if (currentUser.value?.name) {
-    set.add(String(currentUser.value.name).trim())
-  }
-  if (currentList.value?.ownerName) {
-    set.add(String(currentList.value.ownerName).trim())
-  }
-  currentList.value?.items.forEach(i => {
-    if (typeof i.recipientName === 'string' && i.recipientName.trim()) {
-      set.add(i.recipientName.trim())
+  const map = new Map<string, string>()
+  const addName = (raw?: unknown) => {
+    if (typeof raw !== 'string') return
+    const clean = raw.trim()
+    if (!clean || clean.startsWith('user-') || clean.startsWith('google-')) return
+    const key = clean.toLowerCase()
+    if (!map.has(key)) {
+      map.set(key, clean)
     }
+  }
+
+  addName(currentUser.value?.name)
+  addName(currentList.value?.ownerName)
+
+  if (Array.isArray(currentList.value?.members)) {
+    currentList.value!.members.forEach((m: any) => {
+      if (typeof m === 'object' && m !== null && m.name) {
+        addName(m.name)
+      } else if (typeof m === 'string') {
+        addName(m)
+      }
+    })
+  }
+
+  currentList.value?.items.forEach(i => {
+    addName(i.recipientName)
   })
-  return Array.from(set).filter(Boolean)
+
+  return Array.from(map.values())
 })
 
 const activeTab = ref<'link' | 'manual'>('link')
@@ -106,7 +121,7 @@ watch(() => props.isOpen, (open) => {
       form.comment = ensureString(props.editingItem.comment)
       form.isFavorite = Boolean(props.editingItem.isFavorite)
       form.priority = props.editingItem.priority || 'medium'
-      showCustomRecipient.value = !existingRecipients.value.includes(form.recipientName)
+      showCustomRecipient.value = !existingRecipients.value.some(r => r.toLowerCase() === form.recipientName.toLowerCase())
     } else {
       activeTab.value = 'link'
       rawUrlInput.value = ''
@@ -381,7 +396,7 @@ async function handleSubmit() {
                 type="button"
                 @click="selectRecipient(rec)"
                 class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 border"
-                :class="form.recipientName === rec
+                :class="form.recipientName.toLowerCase() === rec.toLowerCase()
                   ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"
               >

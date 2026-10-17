@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import confetti from 'canvas-confetti'
-import type { Wishlist, WishlistItem, WishlistCategory } from '~/types'
+import type { Wishlist, WishlistItem, WishlistCategory, WishlistMember } from '~/types'
 import { useAuth } from './useAuth'
 import { useToast } from './useToast'
 
@@ -8,6 +8,14 @@ const lists = ref<Wishlist[]>([])
 const isLoading = ref(false)
 const searchQuery = ref('')
 const selectedCategory = ref<WishlistCategory | 'all'>('all')
+
+function persistCache() {
+  if (import.meta.client) {
+    try {
+      localStorage.setItem('famwish_lists_cache', JSON.stringify(lists.value))
+    } catch {}
+  }
+}
 
 export function useWishlists() {
   const { currentUser, joinListId } = useAuth()
@@ -73,10 +81,21 @@ export function useWishlists() {
 
       const data = await $fetch<Wishlist[]>('/api/lists', { query })
       if (data && Array.isArray(data)) {
-        lists.value = data
-        if (import.meta.client) {
-          localStorage.setItem('famwish_lists_cache', JSON.stringify(data))
+        // Merge with any in-memory lists the user just joined to avoid race conditions
+        const serverMap = new Map(data.map(l => [l.id, l]))
+        const currentJoinedIds = currentUser.value?.joinedListIds || []
+        for (const existing of lists.value) {
+          if (
+            !serverMap.has(existing.id) &&
+            (existing.ownerId === currentUser.value?.id ||
+              currentJoinedIds.includes(existing.id) ||
+              currentJoinedIds.map(c => c.toUpperCase()).includes(existing.inviteCode.toUpperCase()))
+          ) {
+            serverMap.set(existing.id, existing)
+          }
         }
+        lists.value = Array.from(serverMap.values())
+        persistCache()
       }
     } catch (err) {
       if (import.meta.client) {
@@ -102,6 +121,7 @@ export function useWishlists() {
         } else {
           lists.value.push(data)
         }
+        persistCache()
         return data
       }
       return null
@@ -122,6 +142,14 @@ export function useWishlists() {
       return null
     }
 
+    const ownerMember: WishlistMember = {
+      id: currentUser.value.id,
+      name: currentUser.value.name,
+      avatar: currentUser.value.avatar,
+      joinedAt: new Date().toISOString(),
+      role: 'owner'
+    }
+
     const newList: Wishlist = {
       id: `list-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       ownerId: currentUser.value.id,
@@ -134,7 +162,7 @@ export function useWishlists() {
       coverEmoji: payload.coverEmoji || (payload.category === 'christmas' ? '🎄' : '🎁'),
       coverGradient: payload.coverGradient || 'from-rose-500 via-brand-600 to-pine-700',
       inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
-      members: [currentUser.value.id],
+      members: [ownerMember],
       items: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -152,6 +180,7 @@ export function useWishlists() {
       } else {
         lists.value.unshift(saved)
       }
+      persistCache()
 
       toast.festive('✨ Liste créée !', `Votre liste "${saved.title}" est prête à être partagée.`)
       triggerConfetti()
@@ -159,6 +188,7 @@ export function useWishlists() {
     } catch (err) {
       // Local fallback
       lists.value.unshift(newList)
+      persistCache()
       toast.success('Liste créée (mode local)', newList.title)
       return newList
     }
@@ -174,6 +204,7 @@ export function useWishlists() {
       if (index >= 0) {
         lists.value[index] = saved
       }
+      persistCache()
       toast.success('Liste mise à jour')
       return saved
     } catch (err) {
@@ -181,6 +212,7 @@ export function useWishlists() {
       if (index >= 0) {
         lists.value[index] = list
       }
+      persistCache()
       return list
     }
   }
@@ -189,10 +221,12 @@ export function useWishlists() {
     try {
       await $fetch(`/api/lists/${id}`, { method: 'DELETE' })
       lists.value = lists.value.filter(l => l.id !== id)
+      persistCache()
       toast.info('Liste supprimée')
       return true
     } catch (err) {
       lists.value = lists.value.filter(l => l.id !== id)
+      persistCache()
       return true
     }
   }
@@ -240,10 +274,12 @@ export function useWishlists() {
       } else {
         list.items.unshift(saved)
       }
+      persistCache()
       toast.success('🎁 Cadeau ajouté !', saved.title)
       return saved
     } catch (err) {
       list.items.unshift(newItem)
+      persistCache()
       toast.success('Cadeau ajouté', newItem.title)
       return newItem
     }
@@ -265,6 +301,7 @@ export function useWishlists() {
       if (idx >= 0) {
         list.items[idx] = saved
       }
+      persistCache()
       toast.success('Cadeau modifié')
       return saved
     } catch (err) {
@@ -272,6 +309,7 @@ export function useWishlists() {
       if (idx >= 0) {
         list.items[idx] = item
       }
+      persistCache()
       return item
     }
   }
@@ -283,10 +321,12 @@ export function useWishlists() {
     try {
       await $fetch(`/api/lists/${list.id}/items/${itemId}`, { method: 'DELETE' })
       list.items = list.items.filter(i => i.id !== itemId)
+      persistCache()
       toast.info('Cadeau retiré de la liste')
       return true
     } catch (err) {
       list.items = list.items.filter(i => i.id !== itemId)
+      persistCache()
       return true
     }
   }
@@ -302,8 +342,6 @@ export function useWishlists() {
 
     const item = list.items.find(i => i.id === itemId)
     if (!item) return null
-
-    const prevPurchased = item.isPurchased
 
     // Optimistic UI update
     item.isPurchased = purchased
@@ -337,11 +375,73 @@ export function useWishlists() {
           user: currentUser.value ? { id: currentUser.value.id, name: currentUser.value.name } : undefined
         }
       })
+      persistCache()
       return updated
     } catch (err) {
-      // keep optimistic
+      persistCache()
       return item
     }
+  }
+
+  function ensureLocalMemberAdded(target: Wishlist, user: { id?: string; name: string; avatar?: string }) {
+    const cleanName = user.name.trim()
+    if (!cleanName) return
+    if (!Array.isArray(target.members)) {
+      target.members = []
+    }
+    const existingIdx = target.members.findIndex((m: any) => {
+      if (typeof m === 'string') return m === user.id || m.toLowerCase() === cleanName.toLowerCase()
+      return (user.id && m?.id === user.id) || (m?.name && String(m.name).trim().toLowerCase() === cleanName.toLowerCase())
+    })
+    const memberObj: WishlistMember = {
+      id: user.id || `user-${Date.now()}`,
+      name: cleanName,
+      avatar: user.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
+      joinedAt: new Date().toISOString(),
+      role: user.id === target.ownerId ? 'owner' : 'member'
+    }
+    if (existingIdx >= 0) {
+      if (typeof target.members[existingIdx] === 'string') {
+        target.members[existingIdx] = memberObj
+      }
+    } else {
+      target.members.push(memberObj)
+    }
+  }
+
+  async function syncMemberOnServer(listIdOrCode: string, user?: { id?: string; name: string; avatar?: string; email?: string } | null): Promise<Wishlist | null> {
+    const activeUser = user || currentUser.value
+    if (!activeUser || !activeUser.name) return null
+
+    let target = getList(listIdOrCode)
+    if (target) {
+      ensureLocalMemberAdded(target, activeUser)
+    }
+
+    try {
+      const res = await $fetch<{ success: boolean; member: any; list: Wishlist }>(`/api/lists/${encodeURIComponent(listIdOrCode)}/join`, {
+        method: 'POST',
+        body: {
+          id: activeUser.id,
+          name: activeUser.name,
+          avatar: activeUser.avatar,
+          email: activeUser.email
+        }
+      })
+      if (res?.list) {
+        const idx = lists.value.findIndex(l => l.id === res.list.id)
+        if (idx >= 0) {
+          lists.value[idx] = res.list
+        } else {
+          lists.value.unshift(res.list)
+        }
+        persistCache()
+        return res.list
+      }
+    } catch (e) {
+      console.warn('Could not register join on server:', e)
+    }
+    return target || null
   }
 
   async function joinListByCode(codeOrId: string, memberProfile?: { id?: string; name: string; avatar?: string; email?: string }): Promise<Wishlist | null> {
@@ -369,33 +469,15 @@ export function useWishlists() {
     if (target) {
       const activeUser = memberProfile || currentUser.value
       if (activeUser && activeUser.name) {
-        try {
-          const res = await $fetch<{ success: boolean; member: any; list: Wishlist }>(`/api/lists/${target.id}/join`, {
-            method: 'POST',
-            body: {
-              id: activeUser.id,
-              name: activeUser.name,
-              avatar: activeUser.avatar,
-              email: activeUser.email
-            }
-          })
-          if (res?.list) {
-            target = res.list
-            const idx = lists.value.findIndex(l => l.id === target?.id)
-            if (idx >= 0) {
-              lists.value[idx] = res.list
-            } else {
-              lists.value.unshift(res.list)
-            }
-          }
-        } catch (e) {
-          console.warn('Could not register join on server:', e)
-        }
-
         joinListId(target.id)
         joinListId(target.inviteCode)
+        const synced = await syncMemberOnServer(target.id, activeUser)
+        if (synced) {
+          target = synced
+        }
       }
 
+      persistCache()
       toast.festive('✨ Liste rejointe !', `Vous avez rejoint "${target.title}" de ${target.ownerName}`)
       triggerConfetti()
       return target
@@ -437,6 +519,7 @@ export function useWishlists() {
     deleteItem,
     togglePurchase,
     joinListByCode,
+    syncMemberOnServer,
     triggerConfetti
   }
 }

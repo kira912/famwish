@@ -1,4 +1,4 @@
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import type { UserProfile } from '~/types'
 
 const currentUser = ref<UserProfile | null>(null)
@@ -32,21 +32,14 @@ export function useAuth() {
     }
   }
 
-  function loginAsDemoUser(userId: string) {
-    const found = DEMO_PROFILES.find(p => p.id === userId)
-    if (found) {
-      setUser({ ...found })
-      isAuthModalOpen.value = false
-    }
-  }
-
   function createCustomUser(name: string, email?: string) {
+    const cleanName = name.trim() || 'Mon Profil'
     const newUser: UserProfile = {
       id: `user-${Date.now()}`,
-      name: name.trim() || 'Mon Profil',
-      email: email?.trim() || `${name.toLowerCase().replace(/\s+/g, '')}@famwish.app`,
-      avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(name)}`,
-      joinedListIds: []
+      name: cleanName,
+      email: email?.trim() || `${cleanName.toLowerCase().replace(/\s+/g, '')}@famwish.app`,
+      avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
+      joinedListIds: currentUser.value?.joinedListIds ? [...currentUser.value.joinedListIds] : []
     }
     setUser(newUser)
     isAuthModalOpen.value = false
@@ -71,7 +64,7 @@ export function useAuth() {
         email: data.email,
         name: data.name || data.given_name || 'Utilisateur Google',
         avatar: data.picture || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(data.name || 'user')}`,
-        joinedListIds: currentUser.value?.joinedListIds || []
+        joinedListIds: currentUser.value?.joinedListIds ? [...currentUser.value.joinedListIds] : []
       }
 
       setUser(googleUser)
@@ -118,7 +111,7 @@ export function useAuth() {
   }
 
   function joinListId(listId: string) {
-    if (!currentUser.value) return
+    if (!currentUser.value || !listId) return
     if (!currentUser.value.joinedListIds.includes(listId)) {
       currentUser.value.joinedListIds.push(listId)
       setUser({ ...currentUser.value })
@@ -140,7 +133,6 @@ export function useAuth() {
     isGoogleLoading,
     initAuth,
     setUser,
-    loginAsDemoUser,
     createCustomUser,
     loginWithGoogleCredential,
     triggerGoogleLogin,

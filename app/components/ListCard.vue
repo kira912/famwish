@@ -26,14 +26,34 @@ const isChristmas = computed(() => {
 })
 
 const distinctRecipients = computed(() => {
-  const set = new Set<string>()
-  if (props.list.ownerName) set.add(String(props.list.ownerName).trim())
-  props.list.items.forEach(i => {
-    if (typeof i.recipientName === 'string' && i.recipientName.trim()) {
-      set.add(i.recipientName.trim())
+  const map = new Map<string, string>()
+  const addName = (raw?: unknown) => {
+    if (typeof raw !== 'string') return
+    const clean = raw.trim()
+    if (!clean || clean.startsWith('user-') || clean.startsWith('google-')) return
+    const key = clean.toLowerCase()
+    if (!map.has(key)) {
+      map.set(key, clean)
     }
+  }
+
+  addName(props.list.ownerName)
+
+  if (Array.isArray(props.list.members)) {
+    props.list.members.forEach((m: any) => {
+      if (typeof m === 'object' && m !== null && m.name) {
+        addName(m.name)
+      } else if (typeof m === 'string') {
+        addName(m)
+      }
+    })
+  }
+
+  props.list.items.forEach(i => {
+    addName(i.recipientName)
   })
-  return Array.from(set).filter(Boolean)
+
+  return Array.from(map.values())
 })
 
 const purchasedCount = computed(() => {
@@ -144,13 +164,14 @@ const gradientClass = computed(() => {
         </p>
 
         <!-- Family members involved pills -->
-        <div v-if="distinctRecipients.length > 0" class="mt-2.5 flex flex-wrap gap-1">
+        <div v-if="distinctRecipients.length > 0" class="mt-2.5 flex flex-wrap items-center gap-1">
           <span
             v-for="rec in distinctRecipients"
             :key="rec"
-            class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-medium"
+            class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-semibold flex items-center gap-1"
           >
-            🎁 {{ rec }}
+            <span>🎁</span>
+            <span>{{ rec }}</span>
           </span>
         </div>
       </div>
@@ -158,10 +179,16 @@ const gradientClass = computed(() => {
       <!-- Stats Bar & Progress -->
       <div class="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
         <div class="flex items-center justify-between text-xs font-medium">
-          <span class="text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <Gift class="w-3.5 h-3.5 text-rose-500" />
-            <span>{{ list.items.length }} {{ list.items.length > 1 ? 'cadeaux' : 'cadeau' }}</span>
-          </span>
+          <div class="flex items-center gap-3">
+            <span class="text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Gift class="w-3.5 h-3.5 text-rose-500" />
+              <span>{{ list.items.length }} {{ list.items.length > 1 ? 'cadeaux' : 'cadeau' }}</span>
+            </span>
+            <span class="text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <Users class="w-3.5 h-3.5 text-rose-500" />
+              <span>{{ distinctRecipients.length }} {{ distinctRecipients.length > 1 ? 'membres' : 'membre' }}</span>
+            </span>
+          </div>
 
           <span v-if="!isOwner" class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
             {{ purchasedCount }} / {{ list.items.length }} réservés

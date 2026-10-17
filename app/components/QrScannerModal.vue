@@ -14,6 +14,7 @@ import {
   Loader2
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
+import { useAuth } from '~/composables/useAuth'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const { joinListByCode, lists } = useWishlists()
+const { currentUser } = useAuth()
 const router = useRouter()
 
 // UI state
@@ -207,11 +209,17 @@ async function handleScannedResult(decodedText: string) {
   // Stop scanner before redirecting
   await stopScanner()
 
+  if (!currentUser.value) {
+    emit('close')
+    router.push(`/join?code=${encodeURIComponent(extracted)}`)
+    return
+  }
+
   // Attempt joining list
   isSubmitting.value = true
   errorMsg.value = ''
   try {
-    const list = await joinListByCode(extracted)
+    const list = await joinListByCode(extracted, currentUser.value)
     if (list) {
       emit('close')
       router.push(`/lists/${list.id}`)
@@ -236,8 +244,16 @@ async function handleSubmit() {
 
   const extracted = extractCodeFromQr(inviteCode.value.trim())
 
+  if (!currentUser.value) {
+    inviteCode.value = ''
+    isSubmitting.value = false
+    emit('close')
+    router.push(`/join?code=${encodeURIComponent(extracted)}`)
+    return
+  }
+
   try {
-    const list = await joinListByCode(extracted)
+    const list = await joinListByCode(extracted, currentUser.value)
     if (list) {
       inviteCode.value = ''
       emit('close')

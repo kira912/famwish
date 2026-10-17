@@ -82,8 +82,71 @@ export async function getListById(id: string): Promise<Wishlist | null> {
   return found || null
 }
 
+// Helper to merge member lists without losing joined members
+function mergeMembersList(existingMembers: any[] = [], incomingMembers: any[] = []): any[] {
+  const result: any[] = []
+  const all = [...existingMembers, ...incomingMembers]
+
+  for (const m of all) {
+    if (!m) continue
+    if (typeof m === 'string') {
+      const cleanStr = m.trim()
+      if (!cleanStr) continue
+      const alreadyHas = result.some(r =>
+        (typeof r === 'string' && r.toLowerCase() === cleanStr.toLowerCase()) ||
+        (typeof r === 'object' && (r.id === cleanStr || (r.name && r.name.toLowerCase() === cleanStr.toLowerCase())))
+      )
+      if (!alreadyHas) {
+        result.push(cleanStr)
+      }
+    } else if (typeof m === 'object' && m.name) {
+      const cleanName = String(m.name).trim()
+      if (!cleanName) continue
+      const existingIdx = result.findIndex(r => {
+        if (typeof r === 'string') {
+          return r === m.id || r.toLowerCase() === cleanName.toLowerCase()
+        }
+        return (m.id && r.id === m.id) || (r.name && String(r.name).trim().toLowerCase() === cleanName.toLowerCase())
+      })
+      if (existingIdx >= 0) {
+        result[existingIdx] = {
+          ...(typeof result[existingIdx] === 'object' ? result[existingIdx] : {}),
+          ...m,
+          name: cleanName
+        }
+      } else {
+        result.push({
+          ...m,
+          name: cleanName
+        })
+      }
+    }
+  }
+  return result
+}
+
 // Create or update a wishlist
 export async function saveList(list: Wishlist): Promise<Wishlist> {
+  const existing = await getListById(list.id)
+  const mergedMembers = mergeMembersList(
+    existing?.members || [],
+    Array.isArray(list.members) ? list.members : []
+  )
+
+  // Ensure owner is present as a full member object
+  if (list.ownerName) {
+    const ownerObj = {
+      id: list.ownerId,
+      name: list.ownerName,
+      avatar: list.ownerAvatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(list.ownerName)}`,
+      joinedAt: list.createdAt || new Date().toISOString(),
+      role: 'owner' as const
+    }
+    list.members = mergeMembersList([ownerObj], mergedMembers)
+  } else {
+    list.members = mergedMembers
+  }
+
   const pool = getPgPool()
   if (pool) {
     await initPostgresSchema()
@@ -175,37 +238,31 @@ export async function addMemberToList(
   if (!target) return null
 
   const pool = getPgPool()
-  const members = Array.isArray(target.members) ? [...target.members] : []
+  const currentMembers = Array.isArray(target.members) ? [...target.members] : []
 
-  // Check if member already exists by ID or name
-  const exists = members.some((m: any) => {
-    if (typeof m === 'string') return m === member.id || m.toLowerCase() === member.name.toLowerCase()
-    return m.id === member.id || (m.name && m.name.toLowerCase() === member.name.toLowerCase())
-  })
+  const cleanName = member.name.trim()
+  const memberObj = {
+    id: member.id,
+    name: cleanName,
+    avatar: member.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanName)}`,
+    joinedAt: new Date().toISOString(),
+    role: member.id === target.ownerId ? ('owner' as const) : ('member' as const)
+  }
 
-  if (!exists) {
-    const memberObj = {
-      id: member.id,
-      name: member.name,
-      avatar: member.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(member.name)}`,
-      joinedAt: new Date().toISOString(),
-      role: 'member'
-    }
-    members.push(memberObj)
-    target.members = members
+  const updatedMembers = mergeMembersList(currentMembers, [memberObj])
+  target.members = updatedMembers
 
-    if (pool) {
-      await initPostgresSchema()
-      await pool.query(
-        'UPDATE wishlists SET members = $1, updated_at = NOW() WHERE id = $2',
-        [JSON.stringify(members), target.id]
-      )
-    } else {
-      const idx = listsStore.findIndex(l => l.id === target.id)
-      if (idx >= 0) {
-        listsStore[idx].members = members
-        listsStore[idx].updatedAt = new Date().toISOString()
-      }
+  if (pool) {
+    await initPostgresSchema()
+    await pool.query(
+      'UPDATE wishlists SET members = $1, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(updatedMembers), target.id]
+    )
+  } else {
+    const idx = listsStore.findIndex(l => l.id === target.id)
+    if (idx >= 0) {
+      listsStore[idx].members = updatedMembers
+      listsStore[idx].updatedAt = new Date().toISOString()
     }
   }
 
