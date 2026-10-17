@@ -9,8 +9,6 @@ import {
   deleteItem,
   togglePurchaseItem,
   deleteList,
-  subscribeMemberToPush,
-  unsubscribeMemberFromPush,
   getListNotificationsForMember,
   shouldMemberReceiveNotification
 } from '../../server/utils/db'
@@ -68,7 +66,8 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
         expect.objectContaining({
           id: 'user-owner-1',
           name: 'Sophie',
-          role: 'owner'
+          role: 'owner',
+          pushEnabled: true
         })
       ])
     )
@@ -339,7 +338,7 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     expect(listAfterDelete?.items).toHaveLength(0)
   })
 
-  it('envoie des notifications push aux membres lors d’un ajout ou d’une réservation de cadeau en respectant l’anti-spoiler', async () => {
+  it('active les notifications push par défaut pour les membres et notifie lors d’un ajout ou d’une réservation en respectant l’anti-spoiler', async () => {
     await saveList({
       id: testListId,
       ownerId: 'user-sophie',
@@ -353,7 +352,7 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
       updatedAt: new Date().toISOString()
     })
 
-    // Ajouter Tonton Marc, Manon et l'enfant Lucas (rattaché à Sophie)
+    // Ajouter Tonton Marc, Manon et l'enfant Lucas (rattaché à Sophie) — les notifications push sont actives de base sans configuration
     await addMemberToList(testListId, { id: 'user-marc', name: 'Tonton Marc' })
     await addMemberToList(testListId, { id: 'user-manon', name: 'Manon' })
     await addMemberToList(testListId, {
@@ -365,30 +364,6 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
       parentName: 'Sophie',
       age: 7
     })
-
-    // Sophie, Tonton Marc et Manon s'abonnent aux notifications push
-    const subSophie = await subscribeMemberToPush(testListId, {
-      userId: 'user-sophie',
-      userName: 'Sophie',
-      notifyOnAdd: true,
-      notifyOnReserve: true
-    })
-    const subMarc = await subscribeMemberToPush(testListId, {
-      userId: 'user-marc',
-      userName: 'Tonton Marc',
-      notifyOnAdd: true,
-      notifyOnReserve: true
-    })
-    const subManon = await subscribeMemberToPush(testListId, {
-      userId: 'user-manon',
-      userName: 'Manon',
-      notifyOnAdd: true,
-      notifyOnReserve: true
-    })
-
-    expect(subSophie?.enabled).toBe(true)
-    expect(subMarc?.enabled).toBe(true)
-    expect(subManon?.enabled).toBe(true)
 
     // 1. Sophie ajoute un cadeau pour elle-même ("Pull en cachemire")
     await saveItem(
@@ -406,11 +381,12 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
       { id: 'user-sophie', name: 'Sophie' }
     )
 
-    // Tonton Marc reçoit la notification d'ajout, mais Sophie (qui a fait l'action) ne reçoit pas sa propre notification
+    // Tonton Marc reçoit la notification d'ajout (abonné de base sans config), mais Sophie (qui a fait l'action) ne reçoit pas sa propre notification
     const marcFeedAfterAdd = await getListNotificationsForMember(testListId, {
       userId: 'user-marc',
       userName: 'Tonton Marc'
     })
+    expect(marcFeedAfterAdd.mySubscription?.enabled).toBe(true)
     expect(marcFeedAfterAdd.notifications).toHaveLength(1)
     expect(marcFeedAfterAdd.notifications[0].type).toBe('item_added')
     expect(marcFeedAfterAdd.notifications[0].body).toContain('Pull en cachemire')
@@ -419,6 +395,7 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
       userId: 'user-sophie',
       userName: 'Sophie'
     })
+    expect(sophieFeedAfterOwnAdd.mySubscription?.enabled).toBe(true)
     expect(sophieFeedAfterOwnAdd.notifications).toHaveLength(0)
 
     // 2. Tonton Marc réserve le cadeau de Sophie en secret
@@ -436,6 +413,7 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
       userId: 'user-manon',
       userName: 'Manon'
     })
+    expect(manonFeedAfterReserve.mySubscription?.enabled).toBe(true)
     expect(manonFeedAfterReserve.notifications.some(n => n.type === 'item_reserved')).toBe(true)
     const reserveNotifForManon = manonFeedAfterReserve.notifications.find(n => n.type === 'item_reserved')!
     expect(reserveNotifForManon.body).toContain('Un lutin secret')
@@ -481,10 +459,6 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     expect(sophieFeedAfterChildReserve.notifications).toHaveLength(1)
     expect(sophieFeedAfterChildReserve.notifications[0].type).toBe('item_reserved')
     expect(sophieFeedAfterChildReserve.notifications[0].body).toContain('Tonton Marc a réservé « Train en bois » pour Lucas')
-
-    // 4. Désabonnement de Tonton Marc
-    const unsubbed = await unsubscribeMemberFromPush(testListId, 'user-marc')
-    expect(unsubbed).toBe(true)
   })
 
   it('valide les mappers bidirectionnels Drizzle ORM <-> Entités Domaine et l’injection de Repository', async () => {

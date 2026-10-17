@@ -246,7 +246,8 @@ export class WishlistService {
         name: list.ownerName.trim(),
         avatar: list.ownerAvatar || buildDefaultAvatarUrl(list.ownerName),
         joinedAt: list.createdAt || new Date().toISOString(),
-        role: 'owner'
+        role: 'owner',
+        pushEnabled: true
       }
       finalMembers = mergeMembersList([ownerMember], mergedMembers)
     }
@@ -259,7 +260,26 @@ export class WishlistService {
         : (existing?.items ?? [])
     }
 
-    return repo.upsertList(normalizedList)
+    const saved = await repo.upsertList(normalizedList)
+
+    // Push notifications are active by default for the list owner
+    if (saved.ownerId && saved.ownerName) {
+      const nowIso = new Date().toISOString()
+      await repo.upsertPushSubscription({
+        id: `push-${saved.id}-${saved.ownerId}`,
+        listId: saved.id,
+        userId: saved.ownerId,
+        userName: saved.ownerName.trim(),
+        userAvatar: saved.ownerAvatar || buildDefaultAvatarUrl(saved.ownerName),
+        enabled: true,
+        notifyOnAdd: true,
+        notifyOnReserve: true,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      })
+    }
+
+    return saved
   }
 
   async deleteList(id: string): Promise<boolean> {
@@ -288,12 +308,15 @@ export class WishlistService {
         ? Number(member.age)
         : undefined
 
+    const avatarUrl = member.avatar || buildDefaultAvatarUrl(cleanName)
+
     const memberObj: WishlistMember = {
       id: member.id,
       name: cleanName,
-      avatar: member.avatar || buildDefaultAvatarUrl(cleanName),
+      avatar: avatarUrl,
       joinedAt: new Date().toISOString(),
       role: memberRole,
+      ...(!isChildMember ? { pushEnabled: true } : {}),
       ...(isChildMember
         ? {
             isChild: true,
@@ -305,7 +328,26 @@ export class WishlistService {
     }
 
     const updatedMembers = mergeMembersList(currentMembers, [memberObj])
-    return repo.updateMembers(target.id, updatedMembers, new Date())
+    const updatedList = await repo.updateMembers(target.id, updatedMembers, new Date())
+
+    // Push notifications are active by default for every adult member joining the list
+    if (!isChildMember && member.id) {
+      const nowIso = new Date().toISOString()
+      await repo.upsertPushSubscription({
+        id: `push-${target.id}-${member.id.trim()}`,
+        listId: target.id,
+        userId: member.id.trim(),
+        userName: cleanName,
+        userAvatar: avatarUrl,
+        enabled: true,
+        notifyOnAdd: true,
+        notifyOnReserve: true,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      })
+    }
+
+    return updatedList
   }
 
   async removeMemberFromList(
@@ -611,12 +653,31 @@ export class WishlistService {
     const viewerId = viewer.userId?.trim()
     const viewerNameLower = viewer.userName?.trim().toLowerCase()
 
-    const mySubscription =
+    let mySubscription =
       allSubscriptions.find((s) => {
         if (viewerId && s.userId === viewerId) return true
         if (viewerNameLower && s.userName.trim().toLowerCase() === viewerNameLower) return true
         return false
       }) || null
+
+    // Auto-provision default active subscription for any list member if not yet created
+    if (!mySubscription && viewerId && viewer.userName?.trim()) {
+      const cleanName = viewer.userName.trim()
+      const nowIso = new Date().toISOString()
+      mySubscription = await repo.upsertPushSubscription({
+        id: `push-${target.id}-${viewerId}`,
+        listId: target.id,
+        userId: viewerId,
+        userName: cleanName,
+        userAvatar: buildDefaultAvatarUrl(cleanName),
+        enabled: true,
+        notifyOnAdd: true,
+        notifyOnReserve: true,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      })
+      allSubscriptions.push(mySubscription)
+    }
 
     const sinceTime = viewer.since ? new Date(viewer.since).getTime() : 0
 

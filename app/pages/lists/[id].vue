@@ -20,7 +20,6 @@ import {
   UserMinus,
   Bell,
   BellRing,
-  BellOff,
   X
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
@@ -38,20 +37,14 @@ const {
   deleteItem,
   syncMemberOnServer,
   addChildMember,
-  removeMember,
-  removeChildMember
+  removeMember
 } = useWishlists()
 const { currentUser, joinListId } = useAuth()
 const toast = useToast()
 const {
-  isSubscribing,
   fetchListNotifications,
-  subscribeToListPush,
-  updatePushPreferences,
-  unsubscribeFromListPush,
+  ensureMemberPushActive,
   markAllNotificationsAsSeen,
-  getMySubscription,
-  getListSubscribers,
   getListNotifications,
   getUnreadCount
 } = usePushNotifications()
@@ -87,56 +80,14 @@ const isChildModalOpen = ref(false)
 const isPushModalOpen = ref(false)
 const isCodeCopied = ref(false)
 
-// Push Notifications state for this list
-const myPushSubscription = computed(() => getMySubscription(resolvedListId.value).value)
-const listPushSubscribers = computed(() => getListSubscribers(resolvedListId.value).value)
+// Push Notifications state for this list (active by default for all members)
 const listNotifications = computed(() => getListNotifications(resolvedListId.value).value)
 const unreadNotificationsCount = computed(() => getUnreadCount(resolvedListId.value).value)
-const isPushEnabled = computed(() => Boolean(myPushSubscription.value?.enabled))
-
-const pushPrefs = reactive({
-  notifyOnAdd: true,
-  notifyOnReserve: true
-})
-
-watch(myPushSubscription, (sub) => {
-  if (sub) {
-    pushPrefs.notifyOnAdd = sub.notifyOnAdd
-    pushPrefs.notifyOnReserve = sub.notifyOnReserve
-  }
-}, { immediate: true })
 
 function openPushModal() {
   isPushModalOpen.value = true
   if (resolvedListId.value) {
     markAllNotificationsAsSeen(resolvedListId.value)
-  }
-}
-
-async function handleTogglePushSubscription() {
-  if (!list.value) return
-  if (isPushEnabled.value) {
-    await unsubscribeFromListPush(list.value.id)
-    await fetchListById(list.value.id)
-  } else {
-    const sub = await subscribeToListPush(list.value.id, {
-      notifyOnAdd: pushPrefs.notifyOnAdd,
-      notifyOnReserve: pushPrefs.notifyOnReserve,
-      memberNameFallback: currentUser.value?.name || list.value.ownerName
-    })
-    if (sub) {
-      await fetchListById(list.value.id)
-    }
-  }
-}
-
-async function handleChangePushPref(key: 'notifyOnAdd' | 'notifyOnReserve', value: boolean) {
-  pushPrefs[key] = value
-  if (list.value && isPushEnabled.value) {
-    await updatePushPreferences(list.value.id, {
-      notifyOnAdd: pushPrefs.notifyOnAdd,
-      notifyOnReserve: pushPrefs.notifyOnReserve
-    })
   }
 }
 
@@ -199,7 +150,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
         parentId: meta?.parentId,
         parentName: meta?.parentName,
         age: meta?.age,
-        pushEnabled: meta?.pushEnabled,
+        pushEnabled: meta?.pushEnabled ?? !isChild,
         count: 0,
         availableCount: 0
       })
@@ -212,6 +163,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
       if (isChild) {
         existing.role = 'child'
         existing.isChild = true
+        existing.pushEnabled = false
         if (meta?.parentId) existing.parentId = meta.parentId
         if (meta?.parentName) existing.parentName = meta.parentName
         if (meta?.age !== undefined) existing.age = meta.age
@@ -222,7 +174,7 @@ const recipientsList = computed<RecipientEntry[]>(() => {
   }
 
   const owner = list.value.ownerName || 'Moi'
-  addOrGetRecipient(owner, list.value.ownerAvatar, 'owner', { id: list.value.ownerId })
+  addOrGetRecipient(owner, list.value.ownerAvatar, 'owner', { id: list.value.ownerId, pushEnabled: true })
 
   if (Array.isArray(list.value.members)) {
     list.value.members.forEach((m: any) => {
@@ -234,10 +186,10 @@ const recipientsList = computed<RecipientEntry[]>(() => {
           parentId: m.parentId,
           parentName: m.parentName,
           age: m.age !== undefined && m.age !== null && !isNaN(Number(m.age)) ? Number(m.age) : undefined,
-          pushEnabled: m.pushEnabled
+          pushEnabled: m.pushEnabled ?? !isChild
         })
       } else if (typeof m === 'string') {
-        addOrGetRecipient(m, undefined, 'member')
+        addOrGetRecipient(m, undefined, 'member', { pushEnabled: true })
       }
     })
   }
@@ -269,6 +221,7 @@ const adultMembers = computed(() => {
         name: currentUser.value.name.trim(),
         avatar: currentUser.value.avatar,
         role: isOwner.value ? 'owner' : 'member',
+        pushEnabled: true,
         count: 0,
         availableCount: 0
       })
@@ -476,6 +429,7 @@ async function refreshListAndSyncMember() {
       if (!alreadyInMembers) {
         await syncMemberOnServer(activeList.id, currentUser.value)
       }
+      await ensureMemberPushActive(activeList.id, currentUser.value.name)
     }
     await fetchListNotifications(activeList.id)
   }
@@ -521,6 +475,7 @@ watch(currentUser, async (newUser) => {
     joinListId(list.value.id)
     joinListId(list.value.inviteCode)
     await syncMemberOnServer(list.value.id, newUser)
+    await ensureMemberPushActive(list.value.id, newUser.name)
     await fetchListNotifications(list.value.id)
   }
 })
@@ -647,24 +602,22 @@ async function copyInviteCode() {
         <span>Toutes les listes</span>
       </NuxtLink>
 
-      <!-- Action buttons: Push Notifications, Share & Edit -->
+      <!-- Action buttons: Push Notifications Feed, Share & Edit -->
       <div class="flex items-center gap-2">
-        <!-- Push Notifications Button -->
+        <!-- Push Notifications Activity Feed Button (Active by default) -->
         <button
           @click="openPushModal"
           type="button"
           class="relative flex items-center gap-1.5 py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all shadow-subtle active:scale-98 cursor-pointer"
-          :class="isPushEnabled
-            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 shadow-sm'
-            : (isChristmasList
-                ? 'border border-amber-300/70 dark:border-amber-600/40 bg-white/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
-                : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-semibold')"
-          :title="isPushEnabled ? 'Gérer les notifications push de la liste' : 'Activer les notifications push pour cette liste'"
+          :class="isChristmasList
+            ? 'border border-amber-300/70 dark:border-amber-600/40 bg-white/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
+            : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 font-semibold'"
+          title="Voir les notifications push de la liste"
           aria-label="Notifications push de la liste"
         >
-          <BellRing v-if="isPushEnabled" class="w-3.5 h-3.5 text-amber-200 animate-pulse" />
-          <Bell v-else class="w-3.5 h-3.5 text-rose-500" />
-          <span class="hidden sm:inline">{{ isPushEnabled ? 'Notifications activées 🔔' : 'Notifications push' }}</span>
+          <BellRing v-if="unreadNotificationsCount > 0" class="w-3.5 h-3.5 text-rose-500 animate-pulse" />
+          <Bell v-else class="w-3.5 h-3.5 text-emerald-500" />
+          <span class="hidden sm:inline">Notifications 🔔</span>
           <span
             v-if="unreadNotificationsCount > 0"
             class="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-rose-600 text-white shadow-sm"
@@ -832,7 +785,7 @@ async function copyInviteCode() {
               </div>
             </div>
 
-            <!-- Invite Code & Push Quick Toggle Row -->
+            <!-- Invite Code Row -->
             <div class="flex flex-wrap items-center gap-3 text-xs text-white/95">
               <div class="flex items-center gap-2">
                 <span class="font-medium">{{ isChristmasList ? 'Code secret de la hotte :' : 'Code d\'invitation :' }}</span>
@@ -850,23 +803,6 @@ async function copyInviteCode() {
                   <Copy v-else class="w-3 h-3 text-amber-200" />
                 </button>
               </div>
-
-              <!-- Quick 1-click Push Notification Pill for List Members -->
-              <button
-                @click="handleTogglePushSubscription"
-                :disabled="isSubscribing"
-                type="button"
-                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer border"
-                :class="isPushEnabled
-                  ? 'bg-emerald-600/90 hover:bg-emerald-700 text-white border-emerald-400/60 shadow-sm'
-                  : 'bg-black/35 hover:bg-black/55 text-amber-100 border-white/20'"
-              >
-                <BellRing v-if="isPushEnabled" class="w-3.5 h-3.5 text-amber-200" />
-                <Bell v-else class="w-3.5 h-3.5 text-amber-300" />
-                <span>
-                  {{ isPushEnabled ? 'Alertes push activées 🔔' : 'Activer les alertes push (ajout & réservation)' }}
-                </span>
-              </button>
             </div>
           </div>
         </div>
@@ -1214,7 +1150,36 @@ async function copyInviteCode() {
     <!-- Filters, Search & Stats Row -->
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1 relative z-10">
       <!-- Status Filters -->
-      <button
+      <div
+        class="flex items-center gap-1.5 p-1 rounded-xl border overflow-x-auto"
+        :class="isChristmasList
+          ? 'bg-white/95 dark:bg-slate-900/95 border-amber-300/70 dark:border-amber-700/50 shadow-sm'
+          : 'bg-slate-100/80 dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'"
+      >
+        <button
+          @click="filterStatus = 'all'"
+          type="button"
+          class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
+          :class="filterStatus === 'all'
+            ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
+            : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
+        >
+          Tous ({{ list.items.length }})
+        </button>
+
+        <button
+          @click="filterStatus = 'favorites'"
+          type="button"
+          class="py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-1 transition-colors"
+          :class="filterStatus === 'favorites'
+            ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
+            : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
+        >
+          <Heart class="w-3 h-3" :class="filterStatus === 'favorites' ? 'fill-current' : 'text-rose-500'" />
+          <span>Coups de cœur</span>
+        </button>
+
+        <button
           v-if="!isOwner || (selectedMemberObj && selectedMemberObj.isChild)"
           @click="filterStatus = 'available'"
           type="button"
@@ -1222,11 +1187,11 @@ async function copyInviteCode() {
           :class="filterStatus === 'available'
             ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
             : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-      >
-        {{ isChristmasList ? 'Disponibles sous le sapin' : 'Disponibles' }} ({{ list.items.filter(i => !i.isPurchased).length }})
-      </button>
+        >
+          {{ isChristmasList ? 'Disponibles sous le sapin' : 'Disponibles' }} ({{ list.items.filter(i => !i.isPurchased).length }})
+        </button>
 
-      <button
+        <button
           v-if="!isOwner || (selectedMemberObj && selectedMemberObj.isChild)"
           @click="filterStatus = 'purchased'"
           type="button"
@@ -1234,9 +1199,10 @@ async function copyInviteCode() {
           :class="filterStatus === 'purchased'
             ? (isChristmasList ? 'bg-gradient-to-r from-xmas-700 to-rose-700 text-amber-100 shadow-sm' : 'bg-rose-600 text-white shadow-sm')
             : (isChristmasList ? 'text-amber-950 dark:text-amber-200 hover:text-rose-600' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold')"
-      >
-        {{ isChristmasList ? 'Réservés par les lutins 🎅' : 'Réservés' }} ({{ list.items.filter(i => i.isPurchased).length }})
-      </button>
+        >
+          {{ isChristmasList ? 'Réservés par les lutins 🎅' : 'Réservés' }} ({{ list.items.filter(i => i.isPurchased).length }})
+        </button>
+      </div>
 
       <!-- Search & Budget Estimate -->
       <div class="flex items-center gap-3">
@@ -1394,7 +1360,7 @@ async function copyInviteCode() {
       </button>
     </div>
 
-    <!-- Push Notifications Management & Activity Feed Modal -->
+    <!-- Push Notifications Activity Feed Modal (Active by default, zero config) -->
     <Transition name="modal">
       <div
         v-if="isPushModalOpen"
@@ -1414,21 +1380,15 @@ async function copyInviteCode() {
           <!-- Modal Header -->
           <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0 mb-4">
             <div class="flex items-center gap-3">
-              <div
-                class="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
-                :class="isPushEnabled
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
-                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'"
-              >
-                <BellRing v-if="isPushEnabled" class="w-5 h-5" />
-                <Bell v-else class="w-5 h-5" />
+              <div class="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xl">
+                <BellRing class="w-5 h-5" />
               </div>
               <div>
                 <h3 id="push-modal-title" class="text-lg font-bold font-display text-slate-900 dark:text-white">
                   Notifications Push de la liste
                 </h3>
                 <p class="text-xs text-slate-500 dark:text-slate-400">
-                  Alertes d'ajout et de réservation pour les membres • Anti-spoiler actif
+                  Actives par défaut pour tous les membres • Anti-spoiler garanti
                 </p>
               </div>
             </div>
@@ -1444,108 +1404,18 @@ async function copyInviteCode() {
           </div>
 
           <div class="space-y-4 overflow-y-auto pr-1 flex-1">
-            <!-- Subscription Status & Main CTA -->
-            <div
-              class="p-4 rounded-2xl border space-y-3"
-              :class="isPushEnabled
-                ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60'
-                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <span
-                    class="text-xs font-extrabold block"
-                    :class="isPushEnabled ? 'text-emerald-900 dark:text-emerald-200' : 'text-slate-900 dark:text-white'"
-                  >
-                    {{ isPushEnabled ? '🔔 Notifications Push activées pour vous' : '🔕 Notifications Push désactivées' }}
-                  </span>
-                  <span class="text-[11px] text-slate-600 dark:text-slate-400">
-                    {{ isPushEnabled
-                      ? 'Vous recevez les alertes en temps réel sur cet appareil.'
-                      : 'Activez les alertes pour savoir quand un proche ajoute ou réserve un cadeau.'
-                    }}
-                  </span>
-                </div>
-
-                <button
-                  @click="handleTogglePushSubscription"
-                  :disabled="isSubscribing"
-                  type="button"
-                  class="px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 shadow-sm cursor-pointer"
-                  :class="isPushEnabled
-                    ? 'bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'"
-                >
-                  {{ isSubscribing
-                    ? 'Chargement...'
-                    : (isPushEnabled ? 'Désactiver' : 'Activer les notifications')
-                  }}
-                </button>
+            <!-- Zero-Config Active Info Banner -->
+            <div class="p-3.5 rounded-2xl border bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-xs space-y-1">
+              <div class="font-extrabold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                <span>🔔 Alertes automatiques activées</span>
               </div>
-
-              <!-- Event Type Preferences -->
-              <div class="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 space-y-2">
-                <label class="flex items-start gap-2.5 cursor-pointer text-xs">
-                  <input
-                    type="checkbox"
-                    :checked="pushPrefs.notifyOnAdd"
-                    @change="handleChangePushPref('notifyOnAdd', ($event.target as HTMLInputElement).checked)"
-                    class="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
-                  />
-                  <div>
-                    <span class="font-bold text-slate-900 dark:text-white block">
-                      🎁 Quand quelqu'un ajoute un cadeau
-                    </span>
-                    <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                      Notifie les membres de la liste dès qu'une nouvelle idée cadeau est ajoutée.
-                    </span>
-                  </div>
-                </label>
-
-                <label class="flex items-start gap-2.5 cursor-pointer text-xs">
-                  <input
-                    type="checkbox"
-                    :checked="pushPrefs.notifyOnReserve"
-                    @change="handleChangePushPref('notifyOnReserve', ($event.target as HTMLInputElement).checked)"
-                    class="mt-0.5 rounded text-rose-600 focus:ring-rose-500"
-                  />
-                  <div>
-                    <span class="font-bold text-slate-900 dark:text-white block">
-                      🤫 Quand quelqu'un réserve un cadeau (Anti-spoiler)
-                    </span>
-                    <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                      Notifie les autres membres pour éviter les doublons, sans jamais alerter le bénéficiaire du cadeau !
-                    </span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <!-- Subscribed Members List -->
-            <div v-if="listPushSubscribers.length > 0" class="space-y-1.5">
-              <span class="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                Membres abonnés aux alertes push ({{ listPushSubscribers.length }})
-              </span>
-              <div class="flex flex-wrap gap-1.5">
-                <span
-                  v-for="sub in listPushSubscribers"
-                  :key="sub.id"
-                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold"
-                >
-                  <img
-                    v-if="sub.userAvatar"
-                    :src="sub.userAvatar"
-                    :alt="sub.userName"
-                    class="w-4 h-4 rounded-full object-cover"
-                  />
-                  <span>{{ sub.userName }}</span>
-                  <span class="text-[10px]">🔔</span>
-                </span>
-              </div>
+              <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                Tous les membres de la liste sont automatiquement notifiés lorsqu'un cadeau est ajouté (🎁) ou réservé (🤫), sans jamais dévoiler la surprise au destinataire du cadeau.
+              </p>
             </div>
 
             <!-- Recent Push Notifications Feed (Filtered with Anti-Spoiler) -->
-            <div class="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div class="space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold text-slate-800 dark:text-slate-200">
                   Historique des notifications ({{ listNotifications.length }})
@@ -1556,7 +1426,7 @@ async function copyInviteCode() {
                 </span>
               </div>
 
-              <div v-if="listNotifications.length > 0" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+              <div v-if="listNotifications.length > 0" class="space-y-2 max-h-72 overflow-y-auto pr-1">
                 <div
                   v-for="notif in listNotifications"
                   :key="notif.id"
@@ -1653,7 +1523,7 @@ async function copyInviteCode() {
                   type="text"
                   required
                   placeholder="Ex: Lucas, Emma, Léo..."
-                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
@@ -1661,46 +1531,41 @@ async function copyInviteCode() {
                 <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Âge (optionnel)
                 </label>
-                <div class="relative">
-                  <input
-                    v-model.number="childForm.age"
-                    type="number"
-                    min="0"
-                    max="18"
-                    placeholder="Ex: 6"
-                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 pr-10"
-                  />
-                  <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">
-                    ans
-                  </span>
-                </div>
+                <input
+                  v-model.number="childForm.age"
+                  type="number"
+                  min="0"
+                  max="18"
+                  placeholder="Ex: 6"
+                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
               </div>
             </div>
 
-            <!-- Attached Parent Selection -->
-            <div class="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <!-- Parent Attachment Selector -->
+            <div class="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 space-y-2.5">
               <div class="flex items-center justify-between">
-                <label class="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  <UserCheck class="w-3.5 h-3.5 text-sky-500" />
-                  <span>Rattaché à quel parent ? *</span>
+                <label class="text-xs font-bold text-sky-950 dark:text-sky-200 flex items-center gap-1.5">
+                  <UserCheck class="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                  <span>Parent responsable dans la liste *</span>
                 </label>
                 <button
                   type="button"
                   @click="showCustomParentInput = !showCustomParentInput"
-                  class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+                  class="text-[11px] font-semibold text-sky-600 dark:text-sky-400 hover:underline"
                 >
-                  {{ showCustomParentInput ? 'Choisir un membre' : '+ Autre parent' }}
+                  {{ showCustomParentInput ? 'Choisir un membre existant' : 'Saisir un autre parent' }}
                 </button>
               </div>
 
               <!-- Adult Member Pills -->
-              <div v-if="!showCustomParentInput" class="flex flex-wrap gap-1.5">
+              <div v-if="!showCustomParentInput && adultMembers.length > 0" class="flex flex-wrap gap-2">
                 <button
                   v-for="adult in adultMembers"
                   :key="adult.key"
                   type="button"
                   @click="selectParentForChild(adult)"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
                   :class="childForm.parentName.toLowerCase() === adult.name.toLowerCase()
                     ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
                     : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'"

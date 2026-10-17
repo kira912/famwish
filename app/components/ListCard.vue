@@ -406,12 +406,6 @@ async function copyCode() {
                 <span>Surprise gardée</span>
               </span>
             </template>
-            <template v-else>
-              <span class="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Lock class="w-3 h-3 text-rose-500 shrink-0" />
-                <span>Secret préservé (réservations masquées)</span>
-              </span>
-            </template>
           </div>
         </div>
       </div>

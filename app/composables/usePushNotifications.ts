@@ -170,8 +170,9 @@ export function usePushNotifications() {
           const seenSet = readStoredIds(seenKey)
           seenNotificationIdsByList.value[listId] = Array.from(seenSet)
 
-          // Deliver push notifications for any new event if member has push enabled
-          if (data.mySubscription?.enabled && !options.silent) {
+          // Push notifications are enabled by default for all list members
+          const isPushActive = data.mySubscription ? data.mySubscription.enabled : true
+          if (isPushActive && !options.silent) {
             const deliveredKey = getDeliveredStorageKey(listId, userId)
             const deliveredSet = readStoredIds(deliveredKey)
             let updatedDelivered = false
@@ -200,6 +201,57 @@ export function usePushNotifications() {
     }
   }
 
+  /**
+   * Automatically registers the current member for push notifications on the list
+   * by default without requiring any manual configuration.
+   */
+  async function ensureMemberPushActive(
+    listId: string,
+    memberNameFallback?: string
+  ): Promise<PushSubscriptionRecord | null> {
+    if (!listId) return null
+
+    const activeUser = currentUser.value
+    const userId = activeUser?.id
+    const userName = activeUser?.name || memberNameFallback?.trim()
+    if (!userId || !userName) return null
+
+    const existing = subscriptionsByList.value[listId]
+    if (existing?.enabled && existing.userId === userId) {
+      return existing
+    }
+
+    try {
+      await requestBrowserPermission()
+      const webPushData = await extractWebPushEndpoint()
+
+      const res = await $fetch<{
+        success: boolean
+        subscription: PushSubscriptionRecord
+      }>(`/api/lists/${encodeURIComponent(listId)}/notifications/subscribe`, {
+        method: 'POST',
+        body: {
+          userId,
+          userName,
+          userAvatar: activeUser?.avatar,
+          endpoint: webPushData.endpoint,
+          keys: webPushData.keys,
+          enabled: true,
+          notifyOnAdd: true,
+          notifyOnReserve: true
+        }
+      })
+
+      if (res?.subscription) {
+        subscriptionsByList.value[listId] = res.subscription
+        return res.subscription
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
   async function subscribeToListPush(
     listId: string,
     preferences: {
@@ -212,7 +264,6 @@ export function usePushNotifications() {
     isSubscribing.value = true
 
     try {
-      // Ensure user profile exists if guest
       let activeUser = currentUser.value
       if (!activeUser && preferences.memberNameFallback?.trim()) {
         activeUser = createCustomUser(preferences.memberNameFallback.trim())
@@ -243,90 +294,12 @@ export function usePushNotifications() {
 
       if (res?.subscription) {
         subscriptionsByList.value[listId] = res.subscription
-
-        // Refresh list subscribers without re-firing older notifications
-        const currentNotifs = notificationsByList.value[listId] || []
-        if (import.meta.client && currentNotifs.length > 0) {
-          const deliveredKey = getDeliveredStorageKey(listId, activeUser.id)
-          const deliveredSet = readStoredIds(deliveredKey)
-          currentNotifs.forEach(n => deliveredSet.add(n.id))
-          writeStoredIds(deliveredKey, deliveredSet)
-        }
-
         await fetchListNotifications(listId, { silent: true })
-
-        toast.festive(
-          '🔔 Notifications push activées !',
-          'Vous serez alerté quand un membre ajoute ou réserve un cadeau.'
-        )
-        return res.subscription
-      }
-      return null
-    } catch (err) {
-      toast.error('Impossible d\'activer les notifications push')
-      return null
-    } finally {
-      isSubscribing.value = false
-    }
-  }
-
-  async function updatePushPreferences(
-    listId: string,
-    preferences: {
-      notifyOnAdd: boolean
-      notifyOnReserve: boolean
-    }
-  ): Promise<PushSubscriptionRecord | null> {
-    const existing = subscriptionsByList.value[listId]
-    if (!existing || !currentUser.value) return null
-
-    try {
-      const res = await $fetch<{
-        success: boolean
-        subscription: PushSubscriptionRecord
-      }>(`/api/lists/${encodeURIComponent(listId)}/notifications/subscribe`, {
-        method: 'POST',
-        body: {
-          userId: currentUser.value.id,
-          userName: currentUser.value.name,
-          userAvatar: currentUser.value.avatar,
-          endpoint: existing.endpoint,
-          keys: existing.keys,
-          enabled: true,
-          notifyOnAdd: preferences.notifyOnAdd,
-          notifyOnReserve: preferences.notifyOnReserve
-        }
-      })
-
-      if (res?.subscription) {
-        subscriptionsByList.value[listId] = res.subscription
-        await fetchListNotifications(listId, { silent: true })
-        toast.success('Préférences de notifications mises à jour')
         return res.subscription
       }
       return null
     } catch {
-      toast.error('Erreur lors de la mise à jour des préférences')
       return null
-    }
-  }
-
-  async function unsubscribeFromListPush(listId: string): Promise<boolean> {
-    if (!listId || !currentUser.value) return false
-    isSubscribing.value = true
-
-    try {
-      await $fetch(`/api/lists/${encodeURIComponent(listId)}/notifications/subscribe`, {
-        method: 'DELETE',
-        query: { userId: currentUser.value.id }
-      })
-
-      subscriptionsByList.value[listId] = null
-      await fetchListNotifications(listId, { silent: true })
-      toast.info('Notifications push désactivées pour cette liste')
-      return true
-    } catch {
-      return false
     } finally {
       isSubscribing.value = false
     }
@@ -369,9 +342,8 @@ export function usePushNotifications() {
     syncBrowserPermission,
     requestBrowserPermission,
     fetchListNotifications,
+    ensureMemberPushActive,
     subscribeToListPush,
-    updatePushPreferences,
-    unsubscribeFromListPush,
     markAllNotificationsAsSeen,
     getMySubscription,
     getListSubscribers,

@@ -33,7 +33,7 @@ test.describe('Parcours critique E2E FamWish', () => {
     await expect(headerAddBtn).toBeVisible()
     await expect(sectionAddBtn).toBeVisible()
 
-    // Récupérer le code d'invitation affiché sur la bannière
+    // Récupérer le code d'invitation affichiché sur la bannière
     const inviteCodeBtn = ownerPage.locator('button[title="Cliquer pour copier le code"]')
     await expect(inviteCodeBtn).toBeVisible()
     const inviteCode = (await inviteCodeBtn.innerText()).trim()
@@ -71,10 +71,6 @@ test.describe('Parcours critique E2E FamWish', () => {
     const marcMemberTab = guestPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i }).first()
     await expect(marcMemberTab).toBeVisible()
 
-    // Tonton Marc active les notifications push sur la liste
-    await guestPage.getByRole('button', { name: /Activer les alertes push/i }).click()
-    await expect(guestPage.getByRole('button', { name: /Alertes push activées/i })).toBeVisible()
-
     // Vérifier que Tonton Marc voit aussi le bouton d'ajout de cadeau bien visible dans l'en-tête
     await expect(
       guestPage.locator('section[aria-labelledby="list-detail-title"]').getByRole('button', { name: /Ajouter un cadeau/i })
@@ -101,7 +97,7 @@ test.describe('Parcours critique E2E FamWish', () => {
       ownerPage.locator('section[aria-labelledby="members-section-title"]').getByRole('button', { name: /Tonton Marc/i }).first()
     ).toBeVisible()
 
-    // Sophie ajoute un deuxième cadeau -> Tonton Marc (abonné aux notifications push) reçoit la notification !
+    // Sophie ajoute un deuxième cadeau -> Tonton Marc (qui a les notifications push actives de base, sans config) reçoit la notification !
     await ownerPage.locator('section[aria-labelledby="list-detail-title"]').getByRole('button', { name: /Ajouter un cadeau/i }).click()
     const addModal2 = ownerPage.getByRole('dialog')
     await addModal2.getByPlaceholder(/Ex: Lego Star Wars/i).fill('Coffret Thés de Noël')
