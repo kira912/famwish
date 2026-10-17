@@ -489,33 +489,6 @@ async function copyInviteCode() {
       </div>
     </section>
 
-    <!-- Anti-Spoiler Notice for Owner -->
-    <div
-      v-if="isOwner"
-      role="note"
-      class="p-4 rounded-2xl border flex items-center justify-between gap-3 text-xs shadow-sm transition-colors"
-      :class="isChristmasList
-        ? 'bg-gradient-to-r from-amber-50/90 via-xmas-50/60 to-amber-50/90 dark:from-xmas-950/70 dark:via-slate-900/90 dark:to-xmas-950/70 border-amber-300/70 dark:border-amber-600/40'
-        : 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800'"
-    >
-      <div
-        class="flex items-center gap-2.5"
-        :class="isChristmasList ? 'text-amber-950 dark:text-amber-200' : 'text-slate-700 dark:text-slate-300'"
-      >
-        <span v-if="isChristmasList" class="text-base shrink-0">🤫</span>
-        <Lock v-else class="w-4 h-4 text-rose-500 shrink-0" />
-        <span class="leading-relaxed">
-          <strong :class="isChristmasList ? 'text-amber-900 dark:text-amber-100' : ''">
-            {{ isChristmasList ? 'Secret du Père Noël activé :' : 'Mode Anti-Spoiler actif :' }}
-          </strong>
-          {{ isChristmasList
-            ? 'Pour préserver toute la magie au déballage sous le sapin le 25 décembre, vous ne voyez pas quels cadeaux ont été réservés en secret par vos proches ! 🎅🎁'
-            : 'Pour préserver la surprise lors du déballage, vous ne voyez pas quels cadeaux ont été réservés en secret par vos proches ! 🤫'
-          }}
-        </span>
-      </div>
-    </div>
-
     <!-- Multi-person Family Members Tabs Navigation -->
     <section aria-labelledby="members-section-title" class="space-y-3 relative z-10">
       <div class="flex flex-wrap items-center justify-between gap-3">
