@@ -216,16 +216,60 @@ export class WishlistService {
     const cleanKey = memberIdOrName.trim().toLowerCase()
     if (!cleanKey) return target
 
+    const ownerIdLower = (target.ownerId || '').trim().toLowerCase()
+    const ownerNameLower = (target.ownerName || '').trim().toLowerCase()
+
+    // Never remove the list owner
+    if (cleanKey === ownerIdLower || cleanKey === ownerNameLower) {
+      return target
+    }
+
+    const removedKeys = new Set<string>([cleanKey])
     const currentMembers = Array.isArray(target.members) ? [...target.members] : []
     const updatedMembers = currentMembers.filter((entry) => {
       if (!entry) return false
       if (typeof entry === 'string') {
-        return entry.trim().toLowerCase() !== cleanKey
+        const strLower = entry.trim().toLowerCase()
+        if (strLower === ownerIdLower || strLower === ownerNameLower) return true
+        if (strLower === cleanKey) {
+          removedKeys.add(strLower)
+          return false
+        }
+        return true
       }
-      const idMatch = Boolean(entry.id && String(entry.id).trim().toLowerCase() === cleanKey)
-      const nameMatch = Boolean(entry.name && String(entry.name).trim().toLowerCase() === cleanKey)
-      return !idMatch && !nameMatch
+      if (entry.role === 'owner') return true
+      const entryIdLower = entry.id ? String(entry.id).trim().toLowerCase() : ''
+      const entryNameLower = entry.name ? String(entry.name).trim().toLowerCase() : ''
+      if (
+        (ownerIdLower && entryIdLower === ownerIdLower) ||
+        (ownerNameLower && entryNameLower === ownerNameLower)
+      ) {
+        return true
+      }
+
+      const idMatch = Boolean(entryIdLower && entryIdLower === cleanKey)
+      const nameMatch = Boolean(entryNameLower && entryNameLower === cleanKey)
+      if (idMatch || nameMatch) {
+        if (entryIdLower) removedKeys.add(entryIdLower)
+        if (entryNameLower) removedKeys.add(entryNameLower)
+        return false
+      }
+      return true
     })
+
+    // Also delete gifts associated with the removed person
+    if (Array.isArray(target.items)) {
+      for (const item of target.items) {
+        const recIdLower = item.recipientId ? String(item.recipientId).trim().toLowerCase() : ''
+        const recNameLower = item.recipientName ? String(item.recipientName).trim().toLowerCase() : ''
+        if (
+          (recIdLower && removedKeys.has(recIdLower)) ||
+          (recNameLower && removedKeys.has(recNameLower))
+        ) {
+          await repo.deleteItem(target.id, item.id)
+        }
+      }
+    }
 
     return repo.updateMembers(target.id, updatedMembers, new Date())
   }

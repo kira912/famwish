@@ -113,6 +113,74 @@ describe('Parcours critique Backend & Gestion des listes (FamWish)', () => {
     expect(marcLists.map(l => l.id)).toContain(testListId)
   })
 
+  it('permet de supprimer une personne de la liste ainsi que ses cadeaux associés tout en protégeant le créateur', async () => {
+    await saveList({
+      id: testListId,
+      ownerId: 'user-owner-1',
+      ownerName: 'Sophie',
+      title: 'Noël Famille',
+      category: 'christmas',
+      inviteCode: testInviteCode,
+      members: [],
+      items: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    await addMemberToList(testListId, {
+      id: 'user-guest-paul',
+      name: 'Paul'
+    })
+
+    await saveItem(testListId, {
+      id: 'item-paul-1',
+      listId: testListId,
+      title: 'Casque Audio',
+      recipientName: 'Paul',
+      recipientId: 'user-guest-paul',
+      currency: '€',
+      quantity: 1,
+      isFavorite: false,
+      priority: 'medium',
+      isPurchased: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    await saveItem(testListId, {
+      id: 'item-sophie-1',
+      listId: testListId,
+      title: 'Écharpe en laine',
+      recipientName: 'Sophie',
+      recipientId: 'user-owner-1',
+      currency: '€',
+      quantity: 1,
+      isFavorite: true,
+      priority: 'high',
+      isPurchased: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    // Suppression de Paul par son ID
+    const afterRemovePaul = await removeMemberFromList(testListId, 'user-guest-paul')
+    expect(afterRemovePaul).not.toBeNull()
+    const memberNames = (afterRemovePaul!.members as any[]).map(m =>
+      typeof m === 'object' ? m.name : m
+    )
+    expect(memberNames).not.toContain('Paul')
+    expect(memberNames).toContain('Sophie')
+    expect(afterRemovePaul!.items.map(i => i.id)).toEqual(['item-sophie-1'])
+
+    // Le créateur ne peut pas être supprimé
+    const afterAttemptRemoveOwner = await removeMemberFromList(testListId, 'Sophie')
+    const finalMemberNames = (afterAttemptRemoveOwner!.members as any[]).map(m =>
+      typeof m === 'object' ? m.name : m
+    )
+    expect(finalMemberNames).toContain('Sophie')
+    expect(afterAttemptRemoveOwner!.items.map(i => i.id)).toEqual(['item-sophie-1'])
+  })
+
   it('gère l’ajout, la mise à jour, la conservation après édition de liste et le retrait d’un enfant sans compte rattaché à un parent', async () => {
     await saveList({
       id: testListId,

@@ -520,20 +520,52 @@ export function useWishlists() {
     return target || null
   }
 
-  async function removeChildMember(listIdOrCode: string, memberIdOrName: string): Promise<Wishlist | null> {
+  async function removeMember(
+    listIdOrCode: string,
+    memberIdOrName: string,
+    memberDisplayName?: string
+  ): Promise<Wishlist | null> {
     const cleanKey = memberIdOrName.trim().toLowerCase()
     if (!cleanKey) return null
 
+    const removedKeys = new Set<string>([cleanKey])
+    if (memberDisplayName && memberDisplayName.trim()) {
+      removedKeys.add(memberDisplayName.trim().toLowerCase())
+    }
+
     const target = getList(listIdOrCode)
-    if (target && Array.isArray(target.members)) {
-      target.members = target.members.filter((m: any) => {
-        if (typeof m === 'string') return m.trim().toLowerCase() !== cleanKey
-        const idMatch = m?.id && String(m.id).trim().toLowerCase() === cleanKey
-        const nameMatch = m?.name && String(m.name).trim().toLowerCase() === cleanKey
-        return !idMatch && !nameMatch
-      })
+    if (target) {
+      if (Array.isArray(target.members)) {
+        target.members = target.members.filter((m: any) => {
+          if (typeof m === 'string') {
+            const match = removedKeys.has(m.trim().toLowerCase())
+            return !match
+          }
+          const idLower = m?.id ? String(m.id).trim().toLowerCase() : ''
+          const nameLower = m?.name ? String(m.name).trim().toLowerCase() : ''
+          const match = (idLower && removedKeys.has(idLower)) || (nameLower && removedKeys.has(nameLower))
+          if (match) {
+            if (idLower) removedKeys.add(idLower)
+            if (nameLower) removedKeys.add(nameLower)
+          }
+          return !match
+        })
+      }
+
+      if (Array.isArray(target.items)) {
+        target.items = target.items.filter((i: WishlistItem) => {
+          const recIdLower = i.recipientId ? String(i.recipientId).trim().toLowerCase() : ''
+          const recNameLower = i.recipientName ? String(i.recipientName).trim().toLowerCase() : ''
+          return !(
+            (recIdLower && removedKeys.has(recIdLower)) ||
+            (recNameLower && removedKeys.has(recNameLower))
+          )
+        })
+      }
       persistCache()
     }
+
+    const label = memberDisplayName?.trim() || memberIdOrName.trim()
 
     try {
       const res = await $fetch<{ success: boolean; list: Wishlist }>(
@@ -546,13 +578,17 @@ export function useWishlists() {
           lists.value[idx] = res.list
         }
         persistCache()
-        toast.info('Enfant retiré de la liste')
+        toast.info(`${label} a été retiré(e) de la liste`)
         return res.list
       }
     } catch (e) {
-      toast.info('Enfant retiré de la liste')
+      toast.info(`${label} a été retiré(e) de la liste`)
     }
     return target || null
+  }
+
+  async function removeChildMember(listIdOrCode: string, memberIdOrName: string): Promise<Wishlist | null> {
+    return removeMember(listIdOrCode, memberIdOrName)
   }
 
   async function joinListByCode(codeOrId: string, memberProfile?: { id?: string; name: string; avatar?: string; email?: string }): Promise<Wishlist | null> {
@@ -632,6 +668,7 @@ export function useWishlists() {
     joinListByCode,
     syncMemberOnServer,
     addChildMember,
+    removeMember,
     removeChildMember,
     triggerConfetti
   }

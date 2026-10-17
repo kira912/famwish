@@ -17,6 +17,7 @@ import {
   Gift,
   Baby,
   UserCheck,
+  UserMinus,
   X
 } from 'lucide-vue-next'
 import { useWishlists } from '~/composables/useWishlists'
@@ -33,6 +34,7 @@ const {
   deleteItem,
   syncMemberOnServer,
   addChildMember,
+  removeMember,
   removeChildMember
 } = useWishlists()
 const { currentUser, joinListId } = useAuth()
@@ -210,6 +212,18 @@ function getChildInfo(recipientName?: string) {
   }
 }
 
+function isMemberListOwner(member: RecipientEntry): boolean {
+  if (member.role === 'owner') return true
+  if (list.value?.ownerId && member.id && member.id === list.value.ownerId) return true
+  if (
+    list.value?.ownerName &&
+    member.name.trim().toLowerCase() === list.value.ownerName.trim().toLowerCase()
+  ) {
+    return true
+  }
+  return false
+}
+
 function canManageChild(child: RecipientEntry): boolean {
   if (isOwner.value) return true
   if (!currentUser.value) return false
@@ -219,6 +233,15 @@ function canManageChild(child: RecipientEntry): boolean {
     currentUser.value.name &&
     child.parentName.trim().toLowerCase() === currentUser.value.name.trim().toLowerCase()
   ) {
+    return true
+  }
+  return false
+}
+
+function canRemoveMember(member: RecipientEntry): boolean {
+  if (isMemberListOwner(member)) return false
+  if (isOwner.value) return true
+  if ((member.isChild || member.role === 'child') && canManageChild(member)) {
     return true
   }
   return false
@@ -317,14 +340,26 @@ async function handleSaveChild() {
   }
 }
 
-async function handleRemoveChild(child: RecipientEntry) {
-  if (!list.value) return
-  if (confirm(`Voulez-vous retirer l'enfant ${child.name} de cette liste ?`)) {
-    await removeChildMember(list.value.id, child.id || child.name)
-    if (selectedRecipient.value.toLowerCase() === child.name.toLowerCase()) {
+async function handleRemoveMember(member: RecipientEntry) {
+  if (!list.value || !canRemoveMember(member)) return
+  const isChild = Boolean(member.isChild || member.role === 'child')
+  const giftNotice = member.count > 0
+    ? `\nSes ${member.count} cadeau(x) associé(s) seront également supprimés.`
+    : ''
+  const confirmMessage = isChild
+    ? `Voulez-vous retirer l'enfant ${member.name} de cette liste ?${giftNotice}`
+    : `Voulez-vous retirer ${member.name} de cette liste ?${giftNotice}`
+
+  if (confirm(confirmMessage)) {
+    await removeMember(list.value.id, member.id || member.name, member.name)
+    if (selectedRecipient.value.toLowerCase() === member.name.toLowerCase()) {
       selectedRecipient.value = 'all'
     }
   }
+}
+
+async function handleRemoveChild(child: RecipientEntry) {
+  await handleRemoveMember(child)
 }
 
 if (import.meta.server || !list.value) {
@@ -504,20 +539,6 @@ async function copyInviteCode() {
       <!-- Action buttons: Add Child, Share & Edit -->
       <div class="flex items-center gap-2">
         <button
-          @click="openChildModal()"
-          type="button"
-          class="flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-bold transition-all shadow-subtle active:scale-98 border"
-          :class="isChristmasList
-            ? 'border-amber-300/80 dark:border-amber-600/50 bg-white/95 dark:bg-slate-900/95 text-amber-950 dark:text-amber-100 hover:bg-amber-50 dark:hover:bg-slate-800'
-            : 'border-sky-200 dark:border-sky-800/80 bg-sky-50/90 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/60'"
-          title="Ajouter un enfant rattaché à un parent"
-        >
-          <Baby class="w-3.5 h-3.5 text-sky-500" />
-          <span class="hidden sm:inline">Ajouter un enfant</span>
-          <span class="sm:hidden">+ Enfant</span>
-        </button>
-
-        <button
           @click="handleShare"
           type="button"
           class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all shadow-subtle active:scale-98"
@@ -633,31 +654,46 @@ async function copyInviteCode() {
                 <Users class="w-3.5 h-3.5 text-amber-300" />
                 <span>Membres ({{ recipientsList.length }}) :</span>
               </span>
-              <button
+              <div
                 v-for="member in recipientsList"
                 :key="member.key"
-                type="button"
-                @click="selectedRecipient = selectedRecipient.toLowerCase() === member.name.toLowerCase() ? 'all' : member.name"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all border backdrop-blur-md"
+                class="inline-flex items-center rounded-full text-xs font-semibold transition-all border backdrop-blur-md overflow-hidden"
                 :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
                   ? 'bg-white text-slate-900 border-white shadow-sm scale-105'
                   : 'bg-black/35 hover:bg-black/50 text-white border-white/20'"
-                :title="member.isChild && member.parentName
-                  ? `Filtrer les cadeaux de ${member.name} (Enfant de ${member.parentName})`
-                  : `Filtrer les cadeaux de ${member.name}`"
               >
-                <img
-                  v-if="member.avatar"
-                  :src="member.avatar"
-                  :alt="member.name"
-                  class="w-4 h-4 rounded-full object-cover bg-white/20"
-                />
-                <span>{{ member.name }}</span>
-                <span v-if="member.isChild" class="text-[10px]" :title="`Enfant rattaché à ${member.parentName || list.ownerName}`">
-                  👶<template v-if="member.age"> {{ member.age }}a</template>
-                </span>
-                <span v-else-if="member.role === 'owner'" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
-              </button>
+                <button
+                  type="button"
+                  @click="selectedRecipient = selectedRecipient.toLowerCase() === member.name.toLowerCase() ? 'all' : member.name"
+                  class="inline-flex items-center gap-1.5 pl-2.5 py-1 cursor-pointer"
+                  :class="canRemoveMember(member) ? 'pr-1' : 'pr-2.5'"
+                  :title="member.isChild && member.parentName
+                    ? `Filtrer les cadeaux de ${member.name} (Enfant de ${member.parentName})`
+                    : `Filtrer les cadeaux de ${member.name}`"
+                >
+                  <img
+                    v-if="member.avatar"
+                    :src="member.avatar"
+                    :alt="member.name"
+                    class="w-4 h-4 rounded-full object-cover bg-white/20"
+                  />
+                  <span>{{ member.name }}</span>
+                  <span v-if="member.isChild" class="text-[10px]" :title="`Enfant rattaché à ${member.parentName || list.ownerName}`">
+                    👶<template v-if="member.age"> {{ member.age }}a</template>
+                  </span>
+                  <span v-else-if="isMemberListOwner(member)" class="text-[10px] opacity-80" title="Créateur de la liste">👑</span>
+                </button>
+                <button
+                  v-if="canRemoveMember(member)"
+                  type="button"
+                  @click.stop="handleRemoveMember(member)"
+                  class="pr-2 pl-1 py-1 opacity-75 hover:opacity-100 hover:text-rose-400 transition-colors cursor-pointer"
+                  :title="`Retirer ${member.name} de la liste`"
+                  :aria-label="`Retirer ${member.name} de la liste`"
+                >
+                  <X class="w-3 h-3" />
+                </button>
+              </div>
             </div>
 
             <!-- Invite Code pill -->
@@ -797,13 +833,11 @@ async function copyInviteCode() {
           </span>
         </button>
 
-        <!-- Individual Family Member & Child Buttons -->
-        <button
+        <!-- Individual Family Member & Child Pills -->
+        <div
           v-for="member in recipientsList"
           :key="member.key"
-          type="button"
-          @click="selectedRecipient = member.name"
-          class="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 border shadow-sm active:scale-98"
+          class="flex items-center rounded-xl text-xs font-bold transition-all shrink-0 border shadow-sm overflow-hidden"
           :class="[
             selectedRecipient.toLowerCase() === member.name.toLowerCase()
               ? (isChristmasList
@@ -818,47 +852,65 @@ async function copyInviteCode() {
                       : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'))
           ]"
         >
-          <div class="relative shrink-0">
-            <img
-              v-if="member.avatar"
-              :src="member.avatar"
-              :alt="member.name"
-              class="w-5 h-5 rounded-full object-cover ring-1 ring-black/10"
-            />
-            <span v-else>{{ member.isChild ? '👶' : '🎁' }}</span>
-            <span
-              v-if="member.isChild"
-              class="absolute -bottom-1 -right-1 text-[9px] leading-none"
-              title="Enfant sans compte"
-            >
-              👶
-            </span>
-          </div>
-
-          <div class="text-left leading-tight">
-            <div class="flex items-center gap-1">
-              <span>{{ member.name }}</span>
-              <span v-if="member.isChild && member.age" class="text-[10px] opacity-80 font-semibold">
-                ({{ member.age }} ans)
+          <button
+            type="button"
+            @click="selectedRecipient = member.name"
+            class="flex items-center gap-2 pl-3.5 py-2 cursor-pointer"
+            :class="canRemoveMember(member) ? 'pr-1.5' : 'pr-3.5'"
+          >
+            <div class="relative shrink-0">
+              <img
+                v-if="member.avatar"
+                :src="member.avatar"
+                :alt="member.name"
+                class="w-5 h-5 rounded-full object-cover ring-1 ring-black/10"
+              />
+              <span v-else>{{ member.isChild ? '👶' : '🎁' }}</span>
+              <span
+                v-if="member.isChild"
+                class="absolute -bottom-1 -right-1 text-[9px] leading-none"
+                title="Enfant sans compte"
+              >
+                👶
               </span>
             </div>
-            <span
-              v-if="member.isChild && member.parentName"
-              class="block text-[9px] font-medium opacity-75"
-            >
-              Enfant de {{ member.parentName }}
-            </span>
-          </div>
 
-          <span
-            class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
-            :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
-              ? (isChristmasList ? 'bg-amber-950/20 text-amber-950' : 'bg-white/20 text-white dark:bg-black/20 dark:text-slate-900')
-              : (isChristmasList ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400')"
+            <div class="text-left leading-tight">
+              <div class="flex items-center gap-1">
+                <span>{{ member.name }}</span>
+                <span v-if="member.isChild && member.age" class="text-[10px] opacity-80 font-semibold">
+                  ({{ member.age }} ans)
+                </span>
+              </div>
+              <span
+                v-if="member.isChild && member.parentName"
+                class="block text-[9px] font-medium opacity-75"
+              >
+                Enfant de {{ member.parentName }}
+              </span>
+            </div>
+
+            <span
+              class="px-1.5 py-0.2 rounded-full text-[10px] font-bold"
+              :class="selectedRecipient.toLowerCase() === member.name.toLowerCase()
+                ? (isChristmasList ? 'bg-amber-950/20 text-amber-950' : 'bg-white/20 text-white dark:bg-black/20 dark:text-slate-900')
+                : (isChristmasList ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400')"
+            >
+              {{ member.count }}
+            </span>
+          </button>
+
+          <button
+            v-if="canRemoveMember(member)"
+            type="button"
+            @click.stop="handleRemoveMember(member)"
+            class="pr-2.5 pl-1 py-2 opacity-60 hover:opacity-100 hover:text-rose-500 transition-colors cursor-pointer"
+            :title="`Supprimer ${member.name} de la liste`"
+            :aria-label="`Supprimer ${member.name} de la liste`"
           >
-            {{ member.count }}
-          </span>
-        </button>
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         <!-- Add Child pill button -->
         <button
@@ -888,23 +940,38 @@ async function copyInviteCode() {
         </button>
       </div>
 
-      <!-- Contextual Child Banner when a Child Tab is Selected -->
+      <!-- Contextual Banner when a Member or Child Tab is Selected -->
       <div
-        v-if="selectedMemberObj && (selectedMemberObj.isChild || selectedMemberObj.role === 'child')"
+        v-if="selectedMemberObj"
         class="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
         :class="isChristmasList
           ? 'bg-gradient-to-r from-amber-50/95 via-white/95 to-sky-50/90 dark:from-slate-900/95 dark:via-slate-900 dark:to-sky-950/40 border-amber-300/80 dark:border-amber-600/50 shadow-sm'
-          : 'bg-sky-50/80 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/60'"
+          : (selectedMemberObj.isChild || selectedMemberObj.role === 'child'
+              ? 'bg-sky-50/80 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/60'
+              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-subtle')"
       >
         <div class="flex items-center gap-3">
           <div class="relative shrink-0">
             <img
               :src="selectedMemberObj.avatar"
               :alt="selectedMemberObj.name"
-              class="w-11 h-11 rounded-2xl object-cover bg-white ring-2 ring-sky-300 dark:ring-sky-700 shadow-sm"
+              class="w-11 h-11 rounded-2xl object-cover bg-white ring-2 shadow-sm"
+              :class="selectedMemberObj.isChild || selectedMemberObj.role === 'child'
+                ? 'ring-sky-300 dark:ring-sky-700'
+                : 'ring-rose-200 dark:ring-slate-700'"
             />
-            <span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-sky-500 text-white text-[11px] flex items-center justify-center shadow">
+            <span
+              v-if="selectedMemberObj.isChild || selectedMemberObj.role === 'child'"
+              class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-sky-500 text-white text-[11px] flex items-center justify-center shadow"
+            >
               👶
+            </span>
+            <span
+              v-else-if="isMemberListOwner(selectedMemberObj)"
+              class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-400 text-amber-950 text-[11px] flex items-center justify-center shadow"
+              title="Créateur de la liste"
+            >
+              👑
             </span>
           </div>
           <div>
@@ -913,18 +980,42 @@ async function copyInviteCode() {
                 Souhaits de {{ selectedMemberObj.name }}
               </h3>
               <span
-                v-if="selectedMemberObj.age"
+                v-if="(selectedMemberObj.isChild || selectedMemberObj.role === 'child') && selectedMemberObj.age"
                 class="px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 text-[11px] font-bold"
               >
                 {{ selectedMemberObj.age }} ans
               </span>
-              <span class="px-2 py-0.5 rounded-full bg-white/90 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 text-[11px] font-semibold flex items-center gap-1">
+              <span
+                v-if="selectedMemberObj.isChild || selectedMemberObj.role === 'child'"
+                class="px-2 py-0.5 rounded-full bg-white/90 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 text-[11px] font-semibold flex items-center gap-1"
+              >
                 <UserCheck class="w-3 h-3 text-emerald-500" />
                 <span>Rattaché à <strong>{{ selectedMemberObj.parentName || list.ownerName }}</strong></span>
               </span>
+              <span
+                v-else-if="isMemberListOwner(selectedMemberObj)"
+                class="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 text-[11px] font-bold"
+              >
+                Créateur de la liste 👑
+              </span>
+              <span
+                v-else
+                class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold"
+              >
+                Membre de la liste
+              </span>
             </div>
-            <p class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+            <p
+              v-if="selectedMemberObj.isChild || selectedMemberObj.role === 'child'"
+              class="text-xs text-slate-600 dark:text-slate-400 mt-0.5"
+            >
               Cet enfant n'a pas de compte : sa liste de cadeaux est gérée par <strong>{{ selectedMemberObj.parentName || list.ownerName }}</strong>.
+            </p>
+            <p
+              v-else
+              class="text-xs text-slate-600 dark:text-slate-400 mt-0.5"
+            >
+              {{ selectedMemberObj.count }} cadeau(x) dans la liste pour {{ selectedMemberObj.name }}.
             </p>
           </div>
         </div>
@@ -933,17 +1024,17 @@ async function copyInviteCode() {
           <button
             type="button"
             @click="openAddItem(selectedMemberObj.name)"
-            class="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus class="w-3.5 h-3.5" />
             <span>Ajouter un cadeau</span>
           </button>
 
           <button
-            v-if="canManageChild(selectedMemberObj)"
+            v-if="(selectedMemberObj.isChild || selectedMemberObj.role === 'child') && canManageChild(selectedMemberObj)"
             type="button"
             @click="openChildModal(selectedMemberObj)"
-            class="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            class="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
             title="Modifier les informations de l'enfant"
             aria-label="Modifier l'enfant"
           >
@@ -951,14 +1042,15 @@ async function copyInviteCode() {
           </button>
 
           <button
-            v-if="canManageChild(selectedMemberObj)"
+            v-if="canRemoveMember(selectedMemberObj)"
             type="button"
-            @click="handleRemoveChild(selectedMemberObj)"
-            class="p-2 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-            title="Retirer l'enfant de la liste"
-            aria-label="Retirer l'enfant"
+            @click="handleRemoveMember(selectedMemberObj)"
+            class="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            :title="`Supprimer ${selectedMemberObj.name} de la liste`"
+            :aria-label="`Supprimer ${selectedMemberObj.name} de la liste`"
           >
             <Trash2 class="w-3.5 h-3.5" />
+            <span>Retirer de la liste</span>
           </button>
         </div>
       </div>
